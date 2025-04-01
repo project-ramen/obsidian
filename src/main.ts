@@ -5,6 +5,7 @@ import { Plugin } from 'obsidian';
 import { injectModules } from 'src/modules/Module';
 import { EventModule } from 'src/modules/events';
 import { CommandModule } from './modules/command/CommandModule';
+import { ModulePouchDb } from './modules/pouch-db';
 
 interface MyPluginSettings {
   mySetting: string;
@@ -18,7 +19,11 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 export default class MyPlugin extends Plugin {
   settings: MyPluginSettings = DEFAULT_SETTINGS;
 
-  modules = [new EventModule(this), new CommandModule(this)];
+  modules = [
+    new ModulePouchDb(this, { name: 'testing' }),
+    new EventModule(this),
+    new CommandModule(this),
+  ];
 
   async onload() {
     // await this.loadSettings();
