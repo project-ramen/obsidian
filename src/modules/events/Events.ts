@@ -150,8 +150,8 @@ export class EventModule extends ModulePouchDb {
 
   enqueEvent(file: UXFileInfoStub) {
     serialized(`file-push-event-${file.name}`, async () => {
-      // await this.create(file.name);
-      console.log(await this.db.get(file.name));
+      await this.create(file.path);
+      console.log('testing', await this.db.get(file.path));
     });
   }
 }

@@ -23,12 +23,20 @@ export class ModulePouchDb extends INodeModule {
   initial() {}
 
   async create(filePath: string) {
+    console.log(filePath, process.cwd());
+
+    const tFile = this.core.app.vault.getFileByPath(filePath);
+    const content = await this.core.app.vault.read(tFile);
+
+    const prev = await this.db.get(filePath).catch(() => null);
     await this.db.put({
-      content: 'test',
+      content: content,
       _id: filePath,
       createdAt: new Date(),
       updatedAt: new Date(),
+      _rev: prev?._rev,
     });
+    console.log('asdf: ', await this.db.get(filePath));
   }
 
   update() {}
