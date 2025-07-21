@@ -12,3 +12,5 @@ export type Post = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type LocalDB = PouchDB.Database<Post>;

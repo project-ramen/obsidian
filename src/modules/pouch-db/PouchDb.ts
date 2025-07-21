@@ -1,13 +1,18 @@
 import PouchDB from 'pouchdb';
 import { INodeModule, Ramen } from 'src/interface';
-import type { Post, PouchDbOptionParams, PouchDbOptions } from './type';
+import type {
+  LocalDB,
+  Post,
+  PouchDbOptionParams,
+  PouchDbOptions,
+} from './type';
 
 const defaultValue: PouchDbOptions = {
-  name: 'post',
-  prefix: '',
+  name: 'posts',
+  prefix: './data',
 };
 
-export class ModulePouchDb extends INodeModule {
+export class ModulePouchDB extends INodeModule {
   public db;
   constructor(
     public core: Ramen,
@@ -18,17 +23,20 @@ export class ModulePouchDb extends INodeModule {
     this.db = new PouchDB<Post>(options.name, { ...options });
   }
 
-  $$onLoad(): void {}
+  async $everyOnLoad() {}
+
+  $$getLocalDB(): LocalDB {
+    return this.db;
+  }
 
   initial() {}
 
   async create(filePath: string) {
-    console.log(filePath, process.cwd());
-
     const tFile = this.core.app.vault.getFileByPath(filePath);
-    const content = await this.core.app.vault.read(tFile);
+    const content = tFile ? await this.core.app.vault.read(tFile) : '';
 
     const prev = await this.db.get(filePath).catch(() => null);
+    console.log(content, prev);
     await this.db.put({
       content: content,
       _id: filePath,
@@ -36,7 +44,7 @@ export class ModulePouchDb extends INodeModule {
       updatedAt: new Date(),
       _rev: prev?._rev,
     });
-    console.log('asdf: ', await this.db.get(filePath));
+    console.log('finished');
   }
 
   update() {}

@@ -7,9 +7,9 @@ import {
   TFolder,
 } from 'obsidian';
 import { Ramen } from 'src/interface';
-import { ModulePouchDb } from 'src/modules/pouch-db';
+import { ModulePouchDB } from 'src/modules/pouch-db';
 import { serialized } from 'src/utils';
-import { FilePathWithPrefix, UXFileInfoStub } from './type';
+import { FileEvent, FilePathWithPrefix, UXFileInfoStub } from './type';
 
 export function createTextBlob(data: string | string[]) {
   const d = Array.isArray(data) ? data : [data];
@@ -37,17 +37,10 @@ export async function TFileToUXFileInfo(
   file: TFile,
   deleted?: boolean
 ) {
-  // const isPlain = isPlainText(file.name);
-  // const possiblyLarge = !isPlain;
-
   const fullPath = core.app.vault.getAbstractFileByPath(file.path);
   let content: Blob;
   if (deleted) content = new Blob();
-  else {
-    // if (possiblyLarge) Logger(`Reading   : ${file.path}`, LOG_LEVEL_VERBOSE);
-    content = createBlob(await core.app.vault.read(file));
-    // if (possiblyLarge) Logger(`Processing: ${file.path}`, LOG_LEVEL_VERBOSE);
-  }
+  else content = createBlob(await core.app.vault.read(file));
 
   return {
     name: file.name,
@@ -84,8 +77,8 @@ export function TFileToUXFileInfoStub(
   return ret;
 }
 
-export class EventModule extends ModulePouchDb {
-  $$onLoad() {
+export class ModuleEvent extends ModulePouchDB {
+  async $everyOnLoad() {
     const plugin = this.core;
     const vault = plugin.app.vault;
     this.onCreate = this.onCreate.bind(this);
@@ -121,37 +114,73 @@ export class EventModule extends ModulePouchDb {
   onDelete(file: TAbstractFile, ctx?: any) {
     if (file instanceof TFolder) return;
     const fileInfo = TFileToUXFileInfoStub(file);
-    this.enqueEvent(fileInfo);
+    this.append([
+      {
+        event: 'DELETED',
+        file: fileInfo,
+      },
+    ]);
   }
 
-  onRename(file: TAbstractFile, ctx?: any) {
+  onRename(file: TAbstractFile, oldPath: string, ctx?: any) {
     if (file instanceof TFolder) return;
     const fileInfo = TFileToUXFileInfoStub(file);
-    this.enqueEvent(fileInfo);
+    this.append([
+      {
+        event: 'DELETED',
+        file: fileInfo,
+      },
+      {
+        event: 'CREATED',
+        file: {
+          ...fileInfo,
+          path: oldPath,
+        },
+      },
+    ]);
   }
 
   onCreate(file: TAbstractFile, ctx?: any) {
     if (file instanceof TFolder) return;
     const fileInfo = TFileToUXFileInfoStub(file);
-    this.enqueEvent(fileInfo);
+    this.append([
+      {
+        event: 'CREATED',
+        file: fileInfo,
+      },
+    ]);
   }
 
   onModify(file: TAbstractFile, ctx?: any) {
     if (file instanceof TFolder) return;
     const fileInfo = TFileToUXFileInfoStub(file);
-    this.enqueEvent(fileInfo);
+    console.log(fileInfo);
+    this.append([
+      {
+        event: 'MODIFIED',
+        file: fileInfo,
+      },
+    ]);
   }
 
   onEditorChange(editor: Editor, info: MarkdownFileInfo | MarkdownView) {
     if (!(info instanceof MarkdownView)) return;
     // const fileInfo = TFileToUXFileInfoStub(file);
+    // console.log(fileInfo);
     // this.enqueEvent(fileInfo);
+  }
+
+  append(fileEvents: FileEvent[]) {
+    for (const fileEvent of fileEvents) {
+      const { file } = fileEvent;
+      this.enqueEvent(file);
+    }
   }
 
   enqueEvent(file: UXFileInfoStub) {
     serialized(`file-push-event-${file.name}`, async () => {
+      console.log(file);
       await this.create(file.path);
-      console.log('testing', await this.db.get(file.path));
     });
   }
 }

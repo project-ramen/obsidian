@@ -2,8 +2,8 @@ import { Editor, MarkdownView } from 'obsidian';
 import { INodeModule } from 'src/interface/module';
 import SettingTabModal from 'src/SettingTabModal';
 
-export class CommandModule extends INodeModule {
-  $$onLoad() {
+export class ModuleCommand extends INodeModule {
+  $everyOnLoad() {
     const plugin = this.core;
     plugin.addCommand({
       id: 'open-sample-modal-simple',
@@ -17,7 +17,6 @@ export class CommandModule extends INodeModule {
       id: 'sample-editor-command',
       name: 'Sample editor command',
       editorCallback: (editor: Editor, _) => {
-        console.log(editor.getSelection());
         editor.replaceSelection('Sample Editor Command');
       },
     });

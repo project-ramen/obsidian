@@ -39,3 +39,8 @@ export type UXFolderInfo = {
   children: UXFileInfoStub[];
   parent: FilePath | FilePathWithPrefix | undefined;
 };
+
+export type FileEvent = {
+  event: 'CREATED' | 'MODIFIED' | 'DELETED' | 'RENAMED';
+  file: UXFileInfoStub;
+};

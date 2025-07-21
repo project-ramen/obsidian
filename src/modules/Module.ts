@@ -1,15 +1,27 @@
 import { Ramen } from '../interface';
-import { INodeModule } from 'src/interface/module';
+import { INodeModule as Core } from 'src/interface/module';
 
-function isCoreModule(name: string) {
+export type OverridableFunctionsKeys<T> = {
+  [K in keyof T as K extends `$${string}` ? K : never]: T[K];
+};
+export type Prettify<T> = {
+  [K in keyof T]: T[K];
+  // deno-lint-ignore ban-types
+};
+
+export type INodeModuleBase = OverridableFunctionsKeys<Core>;
+
+export type INodeModule = Prettify<Partial<INodeModuleBase>>;
+
+function isOverridable(name: string) {
+  return name.startsWith('$');
+}
+function isInjectable(name: string) {
   return name.startsWith('$$');
 }
 
-function getCoreModule(module: INodeModule, key: keyof INodeModule) {
-  const coreMethod = module[key];
-  if (isCoreModule(key) && key in module && typeof coreMethod === 'function')
-    return coreMethod;
-  return undefined;
+function isExecutable(name: string) {
+  return name.startsWith('$every');
 }
 
 function getOverridableKeys<T extends Ramen>(target: T): (keyof INodeModule)[] {
@@ -28,22 +40,48 @@ export function injectModules<T extends Ramen>(
   modules: INodeModule[]
 ) {
   const allKeys = getOverridableKeys(target);
-  // const moduleMap = new Map<string, INodeModule>();
+  const moduleMap = new Map<string, INodeModule[]>();
   modules.forEach((module) => {
     allKeys.forEach((key) => {
-      const coreModule = getCoreModule(module, key);
-      if (coreModule) {
-        coreModule.bind(module)();
+      if (key in module) {
+        const list = moduleMap.get(key) || [];
+        // const moduleProperty = module[key];
+        if (isOverridable(key) && typeof module[key] === 'function') {
+          module[key] = module[key]?.bind(module);
+        }
+        list.push(module);
+        moduleMap.set(key, list);
       }
     });
+
+    for (const key of allKeys) {
+      const modules = moduleMap.get(key) ?? [];
+      if (modules.length <= 0) continue;
+
+      switch (true) {
+        case isInjectable(key):
+          {
+            const injectModule = modules[0][key];
+            if (injectModule) target[key] = injectModule;
+          }
+          break;
+        case isExecutable(key):
+          {
+            target[key] = async (...args) => {
+              for (const executeModule of modules) {
+                const mo = executeModule[key];
+                if (!mo) continue;
+
+                await mo(...args);
+                // if(!ret){
+                //
+                // }
+              }
+            };
+          }
+          break;
+      }
+    }
   });
-  // allKeys.forEach((key) => {
-  //   switch (true) {
-  //     case isCoreModule(key):
-  //       {
-  //         target[key]();
-  //       }
-  //       break;
-  //   }
-  // });
+  return true;
 }
