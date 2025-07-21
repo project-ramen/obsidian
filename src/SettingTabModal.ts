@@ -9,7 +9,6 @@ export default class SettingTabModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    console.log(contentEl);
     this.component = new Component({
       target: contentEl,
       props: {
