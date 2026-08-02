@@ -1,0 +1,173 @@
+import { App, Modal, Notice, requestUrl, setIcon } from 'obsidian';
+import MyPlugin from '../../main';
+import { slugFromPath } from '../../sync';
+import { normalizeBlogUrl } from '../../settings/blogs/blog';
+import { BlogConfig } from '../../settings/types';
+import { DeleteCommentModal, formatDate } from '../../comment-preview';
+
+interface AllCommentItem {
+	id: number;
+	post_id: number;
+	post_slug: string;
+	post_title: string;
+	content: string;
+	user_id: string | null;
+	created_at: string;
+}
+
+interface BlogCommentsResult {
+	blog: BlogConfig;
+	comments: AllCommentItem[];
+	error: string | null;
+}
+
+export class AllCommentsModal extends Modal {
+	constructor(app: App, private plugin: MyPlugin) {
+		super(app);
+	}
+
+	onOpen() {
+		this.titleEl.setText('전체 댓글');
+		this.modalEl.addClass('ramen-all-comments-modal');
+		void this.render();
+	}
+
+	private async render() {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		const blogs = this.plugin.settings.blogs.filter(b => b.link && b.password && b.connectedAt);
+		if (!blogs.length) {
+			contentEl.createEl('p', { cls: 'ramen-comment-empty', text: '연결된 블로그가 없습니다.' });
+			return;
+		}
+
+		contentEl.createEl('p', { cls: 'ramen-all-comments-loading', text: '불러오는 중…' });
+
+		const results: BlogCommentsResult[] = await Promise.all(
+			blogs.map(async (blog): Promise<BlogCommentsResult> => {
+				try {
+					const base = normalizeBlogUrl(blog.link);
+					const res = await requestUrl({
+						url: `${base}/api/comments`,
+						method: 'GET',
+						headers: { Authorization: `Bearer ${blog.password}` },
+						throw: false,
+					});
+					if (res.status !== 200) return { blog, comments: [], error: `요청 실패 (${res.status})` };
+					return { blog, comments: res.json as AllCommentItem[], error: null };
+				} catch (e) {
+					return { blog, comments: [], error: String(e) };
+				}
+			}),
+		);
+
+		// 비동기 fetch 중 모달이 닫혔을 수 있음
+		if (!this.contentEl.isConnected) return;
+
+		contentEl.empty();
+
+		const totalCount = results.reduce((sum, r) => sum + r.comments.length, 0);
+		if (totalCount === 0 && results.every(r => !r.error)) {
+			contentEl.createEl('p', { cls: 'ramen-comment-empty', text: '아직 댓글이 없습니다.' });
+		}
+
+		for (const result of results) {
+			this.renderBlogSection(contentEl, result);
+		}
+	}
+
+	private renderBlogSection(container: HTMLElement, { blog, comments, error }: BlogCommentsResult) {
+		const section = container.createEl('div', { cls: 'ramen-all-comments-section' });
+
+		const header = section.createEl('div', { cls: 'ramen-all-comments-blog-header' });
+		header.createEl('span', {
+			cls: 'ramen-all-comments-blog-name',
+			text: blog.rootFolder || blog.link,
+		});
+		header.createEl('span', {
+			cls: 'ramen-all-comments-blog-count',
+			text: error ? error : `${comments.length}개`,
+		});
+
+		if (error) return;
+
+		if (comments.length === 0) {
+			section.createEl('div', { cls: 'ramen-comment-empty', text: '댓글 없음' });
+			return;
+		}
+
+		const list = section.createEl('div', { cls: 'ramen-comment-list' });
+		for (const comment of comments) {
+			this.renderCommentItem(list, comment, blog);
+		}
+	}
+
+	private renderCommentItem(container: HTMLElement, comment: AllCommentItem, blog: BlogConfig) {
+		const item = container.createEl('div', { cls: 'ramen-comment-item' });
+
+		const postRow = item.createEl('div', { cls: 'ramen-all-comments-post-row' });
+		const postTitle = postRow.createEl('span', {
+			cls: 'ramen-all-comments-post-title',
+			text: comment.post_title || comment.post_slug,
+		});
+		postTitle.addEventListener('click', () => void this.openPost(blog, comment.post_slug));
+
+		const meta = item.createEl('div', { cls: 'ramen-comment-meta' });
+		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || '익명' });
+		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at) });
+
+		const deleteBtn = meta.createEl('button', { cls: 'ramen-comment-delete-btn' });
+		setIcon(deleteBtn, 'trash-2');
+		deleteBtn.setAttribute('aria-label', '댓글 삭제');
+		deleteBtn.addEventListener('click', () => {
+			new DeleteCommentModal(this.app, async (password) => {
+				await this.deleteComment(comment, blog, password);
+			}).open();
+		});
+
+		item.createEl('div', { cls: 'ramen-comment-content', text: comment.content });
+	}
+
+	private async openPost(blog: BlogConfig, slug: string) {
+		const root = blog.rootFolder.replace(/\/+$/, '');
+		if (!root) return;
+		const match = this.app.vault.getMarkdownFiles()
+			.filter(f => f.path.startsWith(root + '/'))
+			.find(f => slugFromPath(f.path, blog.rootFolder) === slug);
+		if (!match) {
+			new Notice('vault에서 해당 포스트 파일을 찾을 수 없습니다.', 4000);
+			return;
+		}
+		await this.app.workspace.getLeaf(false).openFile(match);
+		this.close();
+	}
+
+	private async deleteComment(comment: AllCommentItem, blog: BlogConfig, password: string) {
+		const base = normalizeBlogUrl(blog.link);
+		try {
+			const res = await requestUrl({
+				url: `${base}/api/comments/${comment.id}`,
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password }),
+				throw: false,
+			});
+			const body = res.json as { deleted?: boolean };
+			if (res.status === 200 && body.deleted) {
+				new Notice('댓글이 삭제되었습니다.', 3000);
+				void this.render();
+			} else if (res.status === 403) {
+				new Notice('비밀번호가 일치하지 않습니다.', 4000);
+			} else {
+				new Notice(`삭제 실패 (${res.status})`, 4000);
+			}
+		} catch (e) {
+			new Notice(`오류: ${String(e)}`, 4000);
+		}
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}

@@ -1,0 +1,34 @@
+export interface BlogConfig {
+	id: string;
+	rootFolder: string;
+	link: string;
+	password: string;
+	connectedAt?: string;
+	attachmentFolder: string;
+	/** 이 태그가 붙은 글은 블로그에서 /post 대신 /project에 노출됨. 서버 설정값의 로컬 캐시. */
+	projectTag?: string;
+}
+
+export interface MyPluginSettings {
+	blogs: BlogConfig[];
+	themeColor: 'system' | 'dark' | 'light';
+	attachmentLocation: 'bottom' | 'top';
+	showDotfiles: boolean;
+	dotfilesSync: boolean;
+	hideAttachmentFolder: boolean;
+}
+
+export const DEFAULT_SETTINGS: MyPluginSettings = {
+	blogs: [],
+	themeColor: 'system',
+	attachmentLocation: 'bottom',
+	showDotfiles: false,
+	dotfilesSync: false,
+	hideAttachmentFolder: false,
+};
+
+export interface SectionProps {
+	settings: MyPluginSettings;
+	save: (patch: Partial<MyPluginSettings>) => Promise<void>;
+	app: import('obsidian').App;
+}

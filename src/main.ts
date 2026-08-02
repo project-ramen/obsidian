@@ -1,99 +1,657 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
-
-// Remember to rename these classes and interfaces!
+import { Editor, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl, setTooltip } from 'obsidian';
+import { BlogConfig, DEFAULT_SETTINGS, MyPluginSettings, RamenSettingTab } from './settings';
+import { AttachmentPreviewManager } from './attachment-preview';
+import { CommentPreviewManager } from './comment-preview';
+import { InsertImageModal } from './commands/insert-image/InsertImageModal';
+import { AllCommentsModal } from './commands/all-comments/AllCommentsModal';
+import { deletedPostDoc, fileToPostDoc, publishToBlog, pushFileLive, slugFromPath, syncBlog } from './sync';
+import { PullModal } from './commands/pull/PullModal';
+import { PublishModal } from './commands/publish/PublishModal';
+import { ReconnectModal } from './commands/reconnect/ReconnectModal';
+import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
 
 export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+	settings!: MyPluginSettings;
+	attachmentPreview!: AttachmentPreviewManager;
+	commentPreview!: CommentPreviewManager;
+
+	private _modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private _pullingPaths = new Set<string>();
+	private _attachmentFolderStyleEl: HTMLStyleElement | null = null;
+	private _publishedMarkerStyleEl: HTMLStyleElement | null = null;
+	private _publishedMarkerTimer: ReturnType<typeof setTimeout> | null = null;
+	/** path → 공개(published)된 블로그 label. 서버에서 검증된 파일만 포함 (hover 툴팁용) */
+	private _publishedByPath = new Map<string, string>();
+	/** path → 업로드는 됐지만 아직 비공개(draft)인 블로그 label */
+	private _uploadedOnlyByPath = new Map<string, string>();
+	/** 블로그별 마지막 동기화 실패 알림 시각 (스팸 방지) */
+	private _lastSyncFailureNoticeAt = new Map<string, number>();
+	/** 이번 세션에서 서버 검증에 성공한 블로그 rootFolder 집합. 검증된 블로그는 frontmatter 대신 서버 응답을 신뢰함 */
+	private _verifiedBlogRoots = new Set<string>();
 
 	async onload() {
 		await this.loadSettings();
+		this.applyAttachmentFolderHiding();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.attachmentPreview = new AttachmentPreviewManager(this);
+		this.attachmentPreview.register();
+
+		this.commentPreview = new CommentPreviewManager(this);
+		this.commentPreview.register();
+
+		this.addSettingTab(new RamenSettingTab(this.app, this));
+
+		this.addCommand({
+			id: 'insert-image',
+			name: 'Insert image',
+			editorCallback: (editor: Editor) => {
+				new InsertImageModal(this.app, editor).open();
+			},
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: 'view-all-comments',
+			name: 'View all comments (grouped by blog)',
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
+				new AllCommentsModal(this.app, this).open();
+			},
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		this.addCommand({
+			id: 'sync-posts',
+			name: 'Sync posts to blog',
+			callback: () => { void this.runFullSync(); },
+		});
+
+		this.addCommand({
+			id: 'reconnect-blog',
+			name: 'Reconnect to blog',
+			callback: () => {
+				const blogs = this.settings.blogs.filter(b => b.link && b.password);
+				if (!blogs.length) return;
+				new ReconnectModal(
+					this.app,
+					blogs,
+					(blogId, connectedAt) => {
+						this.settings.blogs = this.settings.blogs.map(b =>
+							b.id === blogId ? { ...b, connectedAt } : b
+						);
+						void this.saveSettings();
+					},
+				).open();
+			},
+		});
+
+		this.addCommand({
+			id: 'pull-posts',
+			name: 'Pull posts from blog',
+			callback: () => {
+				const blogs = this.settings.blogs.filter(b => b.link && b.password);
+				if (!blogs.length) return;
+				new PullModal(
+					this.app,
+					blogs,
+					(path) => this._pullingPaths.add(path),
+				).open();
+			},
+		});
+
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (!(file instanceof TFile) || !file.path.endsWith('.md')) return;
+				if (this._pullingPaths.has(file.path)) return;
+
+				const existing = this._modifyTimers.get(file.path);
+				if (existing) clearTimeout(existing);
+				this._modifyTimers.set(
+					file.path,
+					setTimeout(() => {
+						this._modifyTimers.delete(file.path);
+						void this.syncModifiedFile(file);
+					}, 500),
+				);
+			}),
+		);
+
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) => {
+				if (file instanceof TFile && file.path.endsWith('.md')) {
+					void this.syncRenamedFile(file, oldPath);
+					return;
 				}
-				return false;
+				// 폴더 이동/이름변경 — Obsidian은 폴더 자체에 대해서만 'rename'을 한 번 발생시키고
+				// 안의 파일들에 대해선 개별 이벤트를 주지 않으므로, 폴더 안 모든 md 파일을 직접 순회해야 함.
+				if (file instanceof TFolder) {
+					void this.syncRenamedFolder(file, oldPath);
+				}
+			}),
+		);
+
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (!(file instanceof TFile) || !file.path.endsWith('.md')) return;
+				void this.syncDeletedFile(file);
+			}),
+		);
+
+		this.app.workspace.onLayoutReady(() => {
+			void (async () => {
+				await this.tryConnectBlogsAtStartup();
+				void this.runFullSync({ startup: true });
+				this.applyPublishedFileMarkers();
+				await this.refreshUploadedFromServer();
+			})();
+		});
+
+		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
+			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]') as HTMLElement | null;
+			if (!target) return;
+			const path = target.getAttribute('data-path');
+			if (!path) return;
+			const publishedLabel = this._publishedByPath.get(path);
+			if (publishedLabel) {
+				setTooltip(target, `${publishedLabel}에 공개됨`, { placement: 'right' });
+				return;
 			}
+			const uploadedLabel = this._uploadedOnlyByPath.get(path);
+			if (uploadedLabel) setTooltip(target, `${uploadedLabel}에 업로드됨 (비공개)`, { placement: 'right' });
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.registerEvent(
+			this.app.metadataCache.on('changed', () => {
+				if (this._publishedMarkerTimer) clearTimeout(this._publishedMarkerTimer);
+				this._publishedMarkerTimer = setTimeout(() => {
+					this._publishedMarkerTimer = null;
+					this.applyPublishedFileMarkers();
+				}, 1000);
+			}),
+		);
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
+		this.registerEvent(
+			this.app.workspace.on('file-menu', (menu: Menu, abstractFile: TAbstractFile) => {
+				if (!(abstractFile instanceof TFile) || !abstractFile.path.endsWith('.md')) return;
+				const blogs = this.blogsForPath(abstractFile.path).filter(b => b.link && b.password && b.connectedAt);
+				if (!blogs.length) return;
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+				const fm = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
+				const isPublished = fm?.published === true || fm?.published === 1;
 
+				menu.addSeparator();
+
+				if (!isPublished) {
+					menu.addItem(item => item
+						.setTitle('공개로 전환')
+						.setIcon('upload')
+						.onClick(() => void this.togglePostPublished(abstractFile, blogs, true))
+					);
+				} else {
+					menu.addItem(item => item
+						.setTitle('비공개로 전환')
+						.setIcon('eye-off')
+						.onClick(() => void this.togglePostPublished(abstractFile, blogs, false))
+					);
+				}
+
+				menu.addItem(item => item
+					.setTitle('블로그에서 제거')
+					.setIcon('trash-2')
+					.onClick(() => void this.removePostFromBlog(abstractFile, blogs))
+				);
+			}),
+		);
 	}
 
 	onunload() {
+		this.attachmentPreview.unload();
+		this.commentPreview.unload();
+		for (const t of this._modifyTimers.values()) clearTimeout(t);
+		if (this._publishedMarkerTimer) clearTimeout(this._publishedMarkerTimer);
+		this._attachmentFolderStyleEl?.remove();
+		this._attachmentFolderStyleEl = null;
+		this._publishedMarkerStyleEl?.remove();
+		this._publishedMarkerStyleEl = null;
+	}
+
+	applyAttachmentFolderHiding() {
+		this._attachmentFolderStyleEl?.remove();
+		this._attachmentFolderStyleEl = null;
+
+		if (!this.settings.hideAttachmentFolder) {
+			console.log('[ramen] attachment folder hiding: 비활성화');
+			return;
+		}
+
+		// Obsidian 첨부파일 경로 설정
+		// ""  → vault 루트
+		// "." → 현재 파일과 같은 폴더
+		// "./name" → 현재 파일 기준 하위 폴더
+		// "path/to/folder" → vault 기준 절대 경로
+		const obsidianPath = (this.app.vault as any).getConfig('attachmentFolderPath') as string ?? '';
+
+		const blogRoots = this.settings.blogs
+			.map(b => b.rootFolder.replace(/\/+$/, ''))
+			.filter(Boolean);
+
+		if (blogRoots.length === 0) {
+			console.log('[ramen] attachment folder hiding: rootFolder 설정된 블로그 없음, 스킵');
+			return;
+		}
+
+		const targetPaths: string[] = [];
+
+		if (!obsidianPath || obsidianPath === '/' || obsidianPath === '.') {
+			// vault 루트 또는 현재 파일 폴더 → 특정 폴더 식별 불가, 무시
+			console.log(`[ramen] attachment folder hiding: Obsidian 첨부 경로="${obsidianPath}" (vault 루트/동일 폴더), 무시`);
+			return;
+		} else if (obsidianPath.startsWith('./')) {
+			// subfolder 모드: 각 블로그 rootFolder 아래에 해당 폴더가 생김
+			const subName = obsidianPath.slice(2);
+			for (const root of blogRoots) {
+				targetPaths.push(`${root}/${subName}`);
+			}
+			console.log(`[ramen] attachment folder hiding: subfolder 모드 ("${obsidianPath}") → ${targetPaths.join(', ')}`);
+		} else {
+			// 절대 경로 모드: 블로그 rootFolder 내부일 때만 숨김
+			for (const root of blogRoots) {
+				if (obsidianPath === root || obsidianPath.startsWith(root + '/')) {
+					targetPaths.push(obsidianPath);
+					console.log(`[ramen] attachment folder hiding: 절대 경로 모드 "${obsidianPath}" → 블로그 root "${root}" 내부, 숨김 적용`);
+				} else {
+					console.log(`[ramen] attachment folder hiding: 절대 경로 모드 "${obsidianPath}" → 블로그 root "${root}" 외부, 무시`);
+				}
+			}
+		}
+
+		if (targetPaths.length === 0) return;
+
+		const uniquePaths = [...new Set(targetPaths)];
+
+		// 실제 DOM에서 매칭 여부 확인
+		for (const p of uniquePaths) {
+			const el = document.querySelector(`.nav-folder > div[data-path="${p}"]`);
+			console.log(`[ramen] attachment folder hiding: DOM 확인 → "${p}" ${el ? '✓ 요소 발견' : '✗ 요소 없음 (아직 렌더링 전이거나 경로 불일치)'}`);
+			if (!el) {
+				const allFolders = document.querySelectorAll('.nav-folder > div[data-path]');
+				const samples = Array.from(allFolders).slice(0, 5).map(f => f.getAttribute('data-path'));
+				console.log(`[ramen]   → DOM의 data-path 샘플:`, samples);
+			}
+		}
+
+		const rules = uniquePaths.map(p =>
+			`.nav-folder:has(> div[data-path="${p}"]) { display: none !important; }`
+		);
+		console.log('[ramen] attachment folder hiding: 주입할 CSS →\n' + rules.join('\n'));
+		this._attachmentFolderStyleEl = document.createElement('style');
+		this._attachmentFolderStyleEl.textContent = rules.join('\n');
+		document.head.appendChild(this._attachmentFolderStyleEl);
+	}
+
+	applyPublishedFileMarkers() {
+		this._publishedMarkerStyleEl?.remove();
+		this._publishedMarkerStyleEl = null;
+
+		const rules: string[] = [];
+
+		for (const blog of this.settings.blogs) {
+			const root = blog.rootFolder.replace(/\/+$/, '');
+			if (!root) continue;
+
+			const files = this.app.vault.getMarkdownFiles()
+				.filter(f => f.path.startsWith(root + '/'));
+
+			const verified = this._verifiedBlogRoots.has(root);
+			console.log(`[ramen] marker: ${root} → ${files.length}개 파일 검사 (서버 검증: ${verified ? 'O' : 'X, frontmatter로 대체'})`);
+
+			for (const file of files) {
+				let isPublished = false;
+				let isUploadedOnly = false;
+				if (verified) {
+					// 서버가 신뢰할 수 있는 소스: frontmatter가 낡았어도 실제 공개/업로드 상태를 따름
+					isPublished = this._publishedByPath.has(file.path);
+					isUploadedOnly = !isPublished && this._uploadedOnlyByPath.has(file.path);
+				} else {
+					const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+					const pub = fm?.published;
+					if (pub !== undefined) {
+						console.log(`[ramen] marker: ${file.path} published=${JSON.stringify(pub)} (${typeof pub})`);
+					}
+					isPublished = pub === true || pub === 1;
+				}
+				if (isPublished) {
+					rules.push(
+						`.nav-file-title[data-path="${file.path}"] .nav-file-title-content::after {` +
+						` content: " ✓"; color: #4ade80; font-weight: bold; }`
+					);
+				} else if (isUploadedOnly) {
+					rules.push(
+						`.nav-file-title[data-path="${file.path}"] .nav-file-title-content::after {` +
+						` content: " ●"; color: var(--text-faint); font-weight: bold; }`
+					);
+				}
+			}
+		}
+
+		console.log(`[ramen] marker: 생성된 rules ${rules.length}개`);
+		if (rules.length === 0) return;
+
+		this._publishedMarkerStyleEl = document.createElement('style');
+		this._publishedMarkerStyleEl.textContent = rules.join('\n');
+		document.head.appendChild(this._publishedMarkerStyleEl);
+	}
+
+	/**
+	 * 연결된 블로그마다 서버에 실제로 존재하는 포스트(slug/published)를 받아와
+	 * 로컬 vault 파일과 대조한 뒤 체크표시(공개)/업로드전용 표시를 최신화한다.
+	 * frontmatter는 pull 누락이나 웹앱에서의 변경 등으로 낡을 수 있으므로,
+	 * 검증된 블로그에 한해 이 서버 응답을 신뢰 가능한 소스로 사용한다.
+	 */
+	private async refreshUploadedFromServer(): Promise<void> {
+		const blogs = this.settings.blogs.filter(b => b.link && b.password && b.connectedAt);
+		if (!blogs.length) return;
+
+		const newPublished = new Map<string, string>();
+		const newUploadedOnly = new Map<string, string>();
+		const newVerifiedRoots = new Set<string>();
+
+		for (const blog of blogs) {
+			const root = blog.rootFolder.replace(/\/+$/, '');
+			if (!root) continue;
+			const label = blog.rootFolder || blog.link;
+
+			try {
+				const base = normalizeBlogUrl(blog.link);
+				const res = await requestUrl({
+					url: `${base}/api/posts/slugs`,
+					method: 'GET',
+					headers: { Authorization: `Bearer ${blog.password}` },
+					throw: false,
+				});
+				if (res.status !== 200) {
+					console.log(`[ramen] uploaded 확인 실패 (${res.status}): ${label}`);
+					continue;
+				}
+
+				const posts = res.json as Array<{ slug: string; published: boolean }>;
+				const publishedSlugs = new Set(posts.filter(p => p.published).map(p => p.slug));
+				const uploadedSlugs = new Set(posts.map(p => p.slug));
+				newVerifiedRoots.add(root);
+
+				const files = this.app.vault.getMarkdownFiles().filter(f => f.path.startsWith(root + '/'));
+				let publishedCount = 0;
+				let uploadedOnlyCount = 0;
+				for (const file of files) {
+					const slug = slugFromPath(file.path, blog.rootFolder);
+					if (publishedSlugs.has(slug)) {
+						newPublished.set(file.path, label);
+						publishedCount++;
+					} else if (uploadedSlugs.has(slug)) {
+						newUploadedOnly.set(file.path, label);
+						uploadedOnlyCount++;
+					}
+				}
+				console.log(`[ramen] uploaded 확인 완료: ${label} → 서버 ${posts.length}개 중 공개 ${publishedCount}개 / 업로드전용(비공개) ${uploadedOnlyCount}개 매칭`);
+			} catch (e) {
+				console.log(`[ramen] uploaded 확인 오류: ${label}`, e);
+			}
+		}
+
+		this._publishedByPath = newPublished;
+		this._uploadedOnlyByPath = newUploadedOnly;
+		this._verifiedBlogRoots = newVerifiedRoots;
+		this.applyPublishedFileMarkers();
+	}
+
+	private blogsForPath(filePath: string) {
+		return this.settings.blogs.filter(b => {
+			const root = b.rootFolder.replace(/\/+$/, '');
+			return root && filePath.startsWith(root + '/');
+		});
+	}
+
+	private async syncModifiedFile(file: TFile) {
+		for (const blog of this.blogsForPath(file.path)) {
+			try {
+				await pushFileLive(this.app, blog, file);
+			} catch (e) {
+				const name = blog.rootFolder || blog.link;
+				console.error(`[ramen] live push 실패 (${name}):`, e);
+				this.notifySyncFailure(blog, String(e));
+			}
+		}
+	}
+
+	// 같은 블로그에 대해 짧은 시간 내 반복되는 실패 알림(타이핑 중 연속 실패 등) 스팸 방지.
+	private notifySyncFailure(blog: BlogConfig, message: string): void {
+		const now = Date.now();
+		const last = this._lastSyncFailureNoticeAt.get(blog.id) ?? 0;
+		if (now - last < 30_000) return;
+		this._lastSyncFailureNoticeAt.set(blog.id, now);
+		const name = blog.rootFolder || blog.link;
+		new Notice(`[${name}] 동기화 실패: ${message}`, 6000);
+	}
+
+	private async syncRenamedFile(file: TFile, oldPath: string, silent = false) {
+		// 파일 탐색기 체크표시(✓/●)도 옛 경로 키를 새 경로로 옮겨야 이동 직후 사라지지 않음
+		if (this._publishedByPath.has(oldPath)) {
+			this._publishedByPath.set(file.path, this._publishedByPath.get(oldPath)!);
+			this._publishedByPath.delete(oldPath);
+			this.applyPublishedFileMarkers();
+		} else if (this._uploadedOnlyByPath.has(oldPath)) {
+			this._uploadedOnlyByPath.set(file.path, this._uploadedOnlyByPath.get(oldPath)!);
+			this._uploadedOnlyByPath.delete(oldPath);
+			this.applyPublishedFileMarkers();
+		}
+
+		const affectedBlogs = new Set([
+			...this.blogsForPath(file.path),
+			...this.blogsForPath(oldPath),
+		]);
+		console.log(`[ramen] 파일 이동/이름변경 감지: "${oldPath}" → "${file.path}" (매칭 블로그 ${affectedBlogs.size}개)`);
+		if (affectedBlogs.size === 0) return;
+
+		const now = new Date().toISOString();
+		let successCount = 0;
+		for (const blog of affectedBlogs) {
+			try {
+				const root = blog.rootFolder.replace(/\/+$/, '');
+				const extraDocs = [];
+
+				// 이전 slug 삭제
+				if (oldPath.startsWith(root + '/')) {
+					extraDocs.push(deletedPostDoc(
+						slugFromPath(oldPath, blog.rootFolder),
+						oldPath.split('/').pop()?.replace(/\.md$/, '') ?? '',
+					));
+				}
+
+				// 새 slug 즉시 push — rename은 mtime이 바뀌지 않아 syncBlog의 checkpoint 필터에서 누락됨
+				if (file.path.startsWith(root + '/')) {
+					const newDoc = await fileToPostDoc(this.app, file, blog);
+					if (newDoc) {
+						newDoc.updated_at = now;
+						extraDocs.push(newDoc);
+					}
+				}
+
+				await syncBlog(this.app, blog, extraDocs);
+				successCount++;
+			} catch (e) {
+				console.error('[ramen] rename sync failed:', e);
+				this.notifySyncFailure(blog, String(e));
+			}
+		}
+		if (successCount > 0 && !silent) {
+			new Notice(`이동 반영됨: ${file.basename}`, 3000);
+		}
+	}
+
+	// 폴더 이동/이름변경 시, 새 폴더 경로 아래 모든 md 파일을 옛 경로로부터 rename된 것처럼 처리.
+	private async syncRenamedFolder(folder: TFolder, oldFolderPath: string): Promise<void> {
+		const newFolderPath = folder.path;
+		const files = this.app.vault.getMarkdownFiles()
+			.filter(f => f.path.startsWith(newFolderPath + '/'));
+		console.log(`[ramen] 폴더 이동 감지: "${oldFolderPath}" → "${newFolderPath}" (md 파일 ${files.length}개)`);
+		if (files.length === 0) return;
+		for (const file of files) {
+			const oldPath = oldFolderPath + file.path.slice(newFolderPath.length);
+			await this.syncRenamedFile(file, oldPath, true);
+		}
+		new Notice(`폴더 이동 반영: ${files.length}개 파일 동기화됨`, 4000);
+	}
+
+	private async syncDeletedFile(file: TFile) {
+		for (const blog of this.blogsForPath(file.path)) {
+			try {
+				const slug = slugFromPath(file.path, blog.rootFolder);
+				await syncBlog(this.app, blog, [deletedPostDoc(slug, file.basename)]);
+			} catch (e) {
+				console.error('[ramen] delete sync failed:', e);
+				this.notifySyncFailure(blog, String(e));
+			}
+		}
+	}
+
+	async runFullSync({ startup = false }: { startup?: boolean } = {}) {
+		const blogs = this.settings.blogs.filter(b => b.link && b.password && b.connectedAt);
+		if (!blogs.length) {
+			if (startup) console.log('[ramen] 시작 시 자동 sync: 연결된 블로그 없음, 스킵');
+			return;
+		}
+		if (startup) console.log(`[ramen] 시작 시 자동 sync 시작 (${blogs.length}개 블로그)`);
+		for (const blog of blogs) {
+			console.log(`[ramen] sync 시작: ${blog.rootFolder || blog.link}`);
+			try {
+				await syncBlog(this.app, blog, [], (path) => this._pullingPaths.add(path));
+				console.log(`[ramen] sync 완료: ${blog.rootFolder || blog.link}`);
+			} catch (e) {
+				console.error(`[ramen] sync 실패: ${blog.rootFolder || blog.link}`, e);
+			}
+		}
+		if (startup) console.log('[ramen] 시작 시 자동 sync 완료');
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		const saved = await this.loadData() as Partial<MyPluginSettings>;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+		this.settings.blogs = this.settings.blogs.map(b => {
+			const migrated = !b.attachmentFolder;
+			const blog = { ...b, attachmentFolder: b.attachmentFolder || 'attachments' };
+			if (migrated) console.log(`[ramen] loadSettings: attachmentFolder 기본값 적용 → ${blog.rootFolder || blog.id}`);
+			return blog;
+		});
+		console.log(`[ramen] loadSettings 완료: 블로그 ${this.settings.blogs.length}개, hideAttachmentFolder=${this.settings.hideAttachmentFolder}`);
+	}
+
+	private async tryConnectBlogsAtStartup(): Promise<void> {
+		const pending = this.settings.blogs.filter(b => b.link && b.password && !b.connectedAt);
+		if (!pending.length) return;
+
+		let changed = false;
+		for (const blog of pending) {
+			try {
+				const base = normalizeBlogUrl(blog.link);
+				const res = await requestUrl({
+					url: `${base}/api/posts`,
+					method: 'GET',
+					headers: { Authorization: `Bearer ${blog.password}` },
+					throw: false,
+				});
+				if (res.status >= 200 && res.status < 300) {
+					this.settings.blogs = this.settings.blogs.map(b =>
+						b.id === blog.id ? { ...b, link: base, connectedAt: new Date().toISOString() } : b
+					);
+					persistBlogConnection(blog.rootFolder, base, blog.password);
+					console.log(`[ramen] startup connect 성공: ${blog.rootFolder || blog.link}`);
+					changed = true;
+				} else {
+					console.log(`[ramen] startup connect 실패 (${res.status}): ${blog.rootFolder || blog.link}`);
+				}
+			} catch (e) {
+				console.log(`[ramen] startup connect 오류: ${blog.rootFolder || blog.link}`, e);
+			}
+		}
+		if (changed) await this.saveSettings();
+	}
+
+	private async togglePostPublished(file: TFile, blogs: BlogConfig[], publish: boolean): Promise<void> {
+		await this.app.fileManager.processFrontMatter(file, fm => {
+			if (publish) {
+				fm['published'] = true;
+			} else {
+				delete fm['published'];
+			}
+		});
+
+		// 실제로 published 상태가 반영된 블로그만 마커/툴팁에 표시.
+		const applyResult = (blog: BlogConfig, ok: boolean) => {
+			if (!ok) return;
+			const label = blog.rootFolder || blog.link;
+			if (publish) {
+				this._publishedByPath.set(file.path, label);
+				this._uploadedOnlyByPath.delete(file.path);
+			} else {
+				this._publishedByPath.delete(file.path);
+				this._uploadedOnlyByPath.set(file.path, label);
+			}
+			this.applyPublishedFileMarkers();
+		};
+
+		// 겹치는 블로그가 여러 개면 어디에 적용할지 선택하게 함.
+		if (blogs.length > 1) {
+			new PublishModal(this.app, blogs, file, publish, applyResult).open();
+			return;
+		}
+
+		const blog = blogs[0];
+		if (!blog) return;
+		const name = blog.rootFolder || blog.link;
+		const notice = new Notice(`[${name}] ${publish ? '공개' : '비공개'} 전환 중…`, 0);
+		try {
+			await publishToBlog(this.app, blog, file, publish);
+			notice.hide();
+			new Notice(publish ? '공개로 전환됨' : '비공개로 전환됨', 3000);
+			applyResult(blog, true);
+		} catch (e) {
+			notice.hide();
+			new Notice(`전환 실패: ${String(e)}`, 8000);
+			applyResult(blog, false);
+		}
+	}
+
+	private async removePostFromBlog(file: TFile, blogs: BlogConfig[]): Promise<void> {
+		for (const blog of blogs) {
+			const name = blog.rootFolder || blog.link;
+			const notice = new Notice(`[${name}] 제거 중…`, 0);
+			try {
+				const base = normalizeBlogUrl(blog.link);
+				const slug = slugFromPath(file.path, blog.rootFolder);
+				const res = await requestUrl({
+					url: `${base}/api/posts/by-slug/${encodeURIComponent(slug)}`,
+					method: 'PATCH',
+					headers: {
+						'Content-Type': 'application/json',
+						Authorization: `Bearer ${blog.password}`,
+					},
+					body: JSON.stringify({ deleted: true }),
+					throw: false,
+				});
+				notice.hide();
+				if (res.status >= 200 && res.status < 300) {
+					new Notice(`[${name}] 블로그에서 제거됨`, 3000);
+					this._publishedByPath.delete(file.path);
+					this._uploadedOnlyByPath.delete(file.path);
+					this.applyPublishedFileMarkers();
+				} else {
+					new Notice(`[${name}] 제거 실패 (${res.status})`, 5000);
+				}
+			} catch (e) {
+				notice.hide();
+				new Notice(`[${name}] 제거 오류: ${String(e)}`, 5000);
+			}
+		}
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
 	}
 }

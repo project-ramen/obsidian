@@ -1,8 +1,634 @@
-/*
+/* Settings layout */
+.ramen-settings-container {
+	display: flex;
+	height: 100%;
+	gap: 0;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.ramen-settings-nav {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 148px;
+	padding: 4px 12px 4px 0;
+	border-right: 1px solid var(--background-modifier-border);
+}
 
-If your plugin does not need CSS, delete this file.
+.ramen-settings-nav-btn {
+	align-items: center;
+	justify-content: start;
+	background: none;
+	border: none;
+	box-shadow: none !important;
+	background-color: transparent !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	display: flex;
+	font-size: var(--font-ui-small);
+	gap: 7px;
+	padding: 6px 10px;
+	text-align: left;
+	transition: color 0.1s;
+	width: 100%;
+}
 
-*/
+.ramen-settings-nav-btn:hover {
+	background: none;
+	color: var(--text-normal);
+}
+
+.ramen-settings-nav-btn.active {
+	background: none;
+	color: var(--text-accent);
+}
+
+.ramen-nav-icon {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	color: inherit;
+}
+
+.ramen-nav-icon svg {
+	width: 15px;
+	height: 15px;
+	stroke: currentColor;
+}
+
+.ramen-settings-content {
+	flex: 1;
+	padding: 0 16px;
+	overflow-y: auto;
+}
+
+/* Setting group */
+.ramen-setting-group {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	margin: 12px 0;
+	overflow: hidden;
+}
+
+.ramen-setting-group-header {
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	padding: 6px 16px;
+	text-transform: uppercase;
+}
+
+.ramen-setting-group .setting-item {
+	border-top: 1px solid var(--background-modifier-border);
+	border-bottom: none;
+	border: none;
+	background: none;
+}
+
+.ramen-setting-group-footer {
+	align-items: center;
+	border-top: 1px solid var(--background-modifier-border);
+	display: flex;
+	gap: 10px;
+	padding: 10px 16px;
+}
+
+.ramen-connect-status {
+	font-size: var(--font-ui-small);
+}
+
+.ramen-connect-status--ok {
+	color: var(--color-green);
+}
+
+.ramen-connect-status--error {
+	color: var(--color-red);
+}
+
+/* Blog list */
+.ramen-blogs-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 4px 0;
+}
+
+.ramen-blogs-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 12px 0;
+}
+
+.ramen-blog-item {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	overflow: hidden;
+}
+
+.ramen-blog-item-header {
+	align-items: center;
+	cursor: pointer;
+	display: flex;
+	gap: 8px;
+	padding: 10px 12px;
+	user-select: none;
+}
+
+.ramen-blog-item-header:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ramen-status-dot {
+	border-radius: 50%;
+	flex-shrink: 0;
+	height: 8px;
+	width: 8px;
+}
+
+.ramen-status-dot--yellow {
+	background: var(--color-yellow);
+}
+.ramen-status-dot--green {
+	background: var(--color-green);
+}
+.ramen-status-dot--red {
+	background: var(--color-red);
+}
+
+.ramen-blog-item-name {
+	flex: 1;
+	font-size: var(--font-ui-small);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ramen-blog-delete-btn {
+	background: none !important;
+	border: none;
+	box-shadow: none !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: 16px;
+	line-height: 1;
+	padding: 0 2px;
+}
+
+.ramen-blog-delete-btn:hover {
+	color: var(--text-error);
+}
+
+.ramen-blog-item-body {
+	border-top: 1px solid var(--background-modifier-border);
+	padding: 4px 12px 8px;
+}
+
+.ramen-blog-item-footer {
+	align-items: center;
+	display: flex;
+	gap: 10px;
+	padding: 8px 0 4px;
+}
+
+.ramen-project-tag-row {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+}
+
+.ramen-blogs-add-btn {
+	background: none;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: none !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	margin-top: 4px;
+	padding: 8px 12px;
+	text-align: left;
+	width: 100%;
+}
+
+.ramen-blogs-add-btn:hover {
+	border-color: var(--text-muted);
+	color: var(--text-normal);
+}
+
+/* Insert image modal */
+.ramen-insert-image-modal {
+	width: 640px;
+}
+
+.ramen-insert-image-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.ramen-insert-image-search {
+	width: 100%;
+}
+
+.ramen-insert-image-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 24px 0;
+	text-align: center;
+}
+
+.ramen-insert-image-grid {
+	display: grid;
+	gap: 10px;
+	grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+	max-height: 420px;
+	overflow-y: auto;
+	padding: 2px;
+}
+
+.ramen-insert-image-item {
+	align-items: center;
+	background: none;
+	border: 1px solid transparent;
+	border-radius: var(--radius-m);
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px;
+	text-align: center;
+	transition:
+		background 0.1s,
+		border-color 0.1s;
+	width: 100%;
+}
+
+.ramen-insert-image-item:hover {
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border);
+}
+
+.ramen-insert-image-thumb {
+	align-items: center;
+	display: flex;
+	height: 80px;
+	justify-content: center;
+	width: 100%;
+}
+
+.ramen-insert-image-thumb img {
+	border-radius: var(--radius-s);
+	height: 80px;
+	object-fit: cover;
+	width: 100%;
+}
+
+.ramen-insert-image-name {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	width: 100%;
+}
+
+/* Folder autocomplete */
+.ramen-folder-wrapper {
+	position: relative;
+	width: 100%;
+}
+
+.ramen-folder-suggestions {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	list-style: none;
+	margin: 2px 0 0;
+	max-height: 200px;
+	overflow-y: auto;
+	padding: 4px;
+	position: absolute;
+	right: 0;
+	top: 100%;
+	width: 100%;
+	z-index: 100;
+}
+
+.ramen-folder-suggestion-item {
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	padding: 5px 8px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.ramen-folder-suggestion-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Attachment strip */
+.ramen-attachment-strip {
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+	gap: 8px;
+	overflow-x: auto;
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin: 30px 0;
+}
+
+.ramen-attachment-strip.location-bottom {
+	border-bottom: none;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.ramen-strip-label {
+	align-self: start;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	flex-shrink: 0;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	user-select: none;
+}
+
+.ramen-strip-item {
+	flex-shrink: 0;
+	position: relative;
+	width: fit-content;
+}
+
+.ramen-strip-item img {
+	height: 110px;
+	width: auto;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	display: block;
+	object-fit: cover;
+	transition: opacity 0.15s;
+}
+
+.ramen-strip-item:hover img {
+	opacity: 0.75;
+}
+
+.ramen-strip-delete-btn {
+	align-items: center;
+	background: var(--background-modifier-error);
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none !important;
+	color: white;
+	cursor: pointer;
+	display: flex;
+	justify-content: center;
+	opacity: 0;
+	padding: 4px;
+	position: absolute;
+	right: 4px;
+	top: 4px;
+	transition: opacity 0.15s;
+}
+
+.ramen-strip-delete-btn svg {
+	height: 13px;
+	width: 13px;
+}
+
+.ramen-strip-item:hover .ramen-strip-delete-btn {
+	opacity: 1;
+}
+
+/* Hover popup */
+.ramen-image-popup {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-l);
+	display: none;
+	overflow: hidden;
+	pointer-events: none;
+	position: fixed;
+	z-index: 9999;
+}
+
+.ramen-image-popup img {
+	display: block;
+	max-height: 260px;
+	max-width: 360px;
+	object-fit: contain;
+}
+
+/* Comment strip */
+.ramen-comment-strip {
+	border-top: 1px solid var(--background-modifier-border);
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin: 30px 0;
+	padding: 14px 16px;
+}
+
+.ramen-comment-header {
+	align-items: center;
+	display: flex;
+	justify-content: space-between;
+}
+
+.ramen-comment-refresh-btn {
+	background: none;
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	padding: 3px 5px;
+	display: flex;
+	align-items: center;
+}
+
+.ramen-comment-refresh-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.ramen-comment-refresh-btn svg {
+	height: 13px;
+	width: 13px;
+}
+
+.ramen-comment-blog-section {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.ramen-comment-blog-section + .ramen-comment-blog-section {
+	margin-top: 14px;
+	padding-top: 12px;
+	border-top: 1px dashed var(--background-modifier-border);
+}
+
+.ramen-comment-blog-header {
+	align-items: baseline;
+	display: flex;
+	gap: 6px;
+	justify-content: space-between;
+}
+
+.ramen-comment-blog-name {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+}
+
+.ramen-comment-blog-count {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.ramen-comment-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.ramen-comment-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 4px 0;
+}
+
+.ramen-comment-item {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px;
+}
+
+.ramen-comment-meta {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+}
+
+.ramen-comment-user {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.ramen-comment-date {
+	color: var(--text-muted);
+	flex: 1;
+	font-size: var(--font-ui-smaller);
+}
+
+.ramen-comment-delete-btn {
+	align-items: center;
+	background: none;
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	display: flex;
+	opacity: 0;
+	padding: 2px 4px;
+	transition: opacity 0.15s;
+}
+
+.ramen-comment-delete-btn svg {
+	height: 13px;
+	width: 13px;
+}
+
+.ramen-comment-item:hover .ramen-comment-delete-btn {
+	opacity: 1;
+}
+
+.ramen-comment-delete-btn:hover {
+	background: var(--background-modifier-error-hover);
+	color: var(--text-error);
+}
+
+.ramen-comment-content {
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 4;
+	color: var(--text-normal);
+	display: -webkit-box;
+	font-size: var(--font-ui-small);
+	line-height: 1.55;
+	overflow: hidden;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.ramen-comment-password-input {
+	display: block;
+	margin-bottom: 12px;
+	width: 100%;
+}
+
+/* All comments modal */
+.ramen-all-comments-modal {
+	width: 640px;
+}
+
+.ramen-all-comments-loading {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ramen-all-comments-section {
+	margin-bottom: 22px;
+}
+
+.ramen-all-comments-section:last-child {
+	margin-bottom: 0;
+}
+
+.ramen-all-comments-blog-header {
+	align-items: baseline;
+	border-bottom: 1px solid var(--background-modifier-border);
+	display: flex;
+	gap: 8px;
+	justify-content: space-between;
+	margin-bottom: 10px;
+	padding-bottom: 6px;
+}
+
+.ramen-all-comments-blog-name {
+	color: var(--text-normal);
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+}
+
+.ramen-all-comments-blog-count {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.ramen-all-comments-post-row {
+	margin-bottom: 2px;
+}
+
+.ramen-all-comments-post-title {
+	color: var(--text-accent);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.ramen-all-comments-post-title:hover {
+	text-decoration: underline;
+}
