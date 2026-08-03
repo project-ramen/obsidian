@@ -1,6 +1,7 @@
 import { App, FuzzySuggestModal, Notice, requestUrl } from 'obsidian';
 import { BlogConfig } from '../../settings/types';
 import { normalizeBlogUrl, persistBlogConnection } from '../../settings/blogs/blog';
+import { Locale, t } from '../../i18n';
 
 interface BlogOption {
 	blog: BlogConfig | null;
@@ -12,9 +13,10 @@ export class ReconnectModal extends FuzzySuggestModal<BlogOption> {
 		app: App,
 		private blogs: BlogConfig[],
 		private onReconnected: (blogId: string, connectedAt: string) => void,
+		private locale: Locale = 'ko',
 	) {
 		super(app);
-		this.setPlaceholder('Select a blog to reconnect…');
+		this.setPlaceholder(t(locale, 'reconnectModalPlaceholder'));
 	}
 
 	getItems(): BlogOption[] {
@@ -23,7 +25,7 @@ export class ReconnectModal extends FuzzySuggestModal<BlogOption> {
 			label: `${blog.rootFolder || 'Untitled'}  ${blog.link}`,
 		}));
 		if (this.blogs.length > 1) {
-			items.push({ blog: null, label: 'Reconnect all blogs' });
+			items.push({ blog: null, label: t(this.locale, 'reconnectModalAllBlogs') });
 		}
 		return items;
 	}
@@ -41,7 +43,7 @@ export class ReconnectModal extends FuzzySuggestModal<BlogOption> {
 
 	private async doReconnect(blog: BlogConfig): Promise<void> {
 		const name = blog.rootFolder || blog.link;
-		const notice = new Notice(`[${name}] 연결 중…`, 0);
+		const notice = new Notice(t(this.locale, 'reconnectConnecting', { name }), 0);
 		try {
 			const base = normalizeBlogUrl(blog.link);
 			const res = await requestUrl({
@@ -55,15 +57,15 @@ export class ReconnectModal extends FuzzySuggestModal<BlogOption> {
 				const connectedAt = new Date().toISOString();
 				persistBlogConnection(blog.rootFolder, base, blog.password);
 				this.onReconnected(blog.id, connectedAt);
-				new Notice(`[${name}] 연결 성공`, 4000);
+				new Notice(t(this.locale, 'reconnectSuccess', { name }), 4000);
 				console.log(`[ramen] reconnect 성공: ${name}`);
 			} else {
-				new Notice(`[${name}] 연결 실패 (${res.status})`, 6000);
+				new Notice(t(this.locale, 'reconnectFailed', { name, status: res.status }), 6000);
 				console.warn(`[ramen] reconnect 실패 (${res.status}): ${name}`);
 			}
 		} catch (e) {
 			notice.hide();
-			new Notice(`[${name}] 연결 오류: ${String(e)}`, 6000);
+			new Notice(t(this.locale, 'reconnectError', { name, e: String(e) }), 6000);
 			console.error(`[ramen] reconnect 오류: ${name}`, e);
 		}
 	}

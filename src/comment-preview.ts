@@ -3,6 +3,7 @@ import MyPlugin from './main';
 import { slugFromPath } from './sync';
 import { normalizeBlogUrl } from './settings/blogs/blog';
 import { BlogConfig } from './settings/types';
+import { Locale, t } from './i18n';
 
 interface CommentItem {
 	id: number;
@@ -17,24 +18,25 @@ export class DeleteCommentModal extends Modal {
 	constructor(
 		app: App,
 		private onDelete: (password: string) => Promise<void>,
+		private locale: Locale = 'ko',
 	) {
 		super(app);
 	}
 
 	onOpen() {
-		this.titleEl.setText('댓글 삭제');
-		this.contentEl.createEl('p', { text: '댓글 작성 시 입력한 비밀번호를 입력하세요.' });
+		this.titleEl.setText(t(this.locale, 'deleteCommentTitle'));
+		this.contentEl.createEl('p', { text: t(this.locale, 'deleteCommentPrompt') });
 
 		this.passwordInput = this.contentEl.createEl('input', { cls: 'ramen-comment-password-input' });
 		this.passwordInput.type = 'password';
-		this.passwordInput.placeholder = '비밀번호';
+		this.passwordInput.placeholder = t(this.locale, 'passwordPlaceholder');
 		this.passwordInput.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter') void this.submit();
 		});
 
 		const btnRow = this.contentEl.createEl('div', { cls: 'modal-button-container' });
-		btnRow.createEl('button', { text: '취소' }).addEventListener('click', () => this.close());
-		const confirmBtn = btnRow.createEl('button', { text: '삭제', cls: 'mod-warning' });
+		btnRow.createEl('button', { text: t(this.locale, 'cancel') }).addEventListener('click', () => this.close());
+		const confirmBtn = btnRow.createEl('button', { text: t(this.locale, 'delete'), cls: 'mod-warning' });
 		confirmBtn.addEventListener('click', () => void this.submit());
 
 		setTimeout(() => this.passwordInput.focus(), 50);
@@ -126,13 +128,14 @@ export class CommentPreviewManager {
 
 		const strip = createEl('div', { cls: 'ramen-comment-strip' });
 
+		const locale = this.plugin.settings.language;
 		const totalCount = results.reduce((sum, r) => sum + r.comments.length, 0);
 		const header = strip.createEl('div', { cls: 'ramen-comment-header' });
-		header.createEl('span', { cls: 'ramen-strip-label', text: `댓글 (${totalCount}개)` });
+		header.createEl('span', { cls: 'ramen-strip-label', text: t(locale, 'commentsCountLabel', { count: totalCount }) });
 
 		const refreshBtn = header.createEl('button', { cls: 'ramen-comment-refresh-btn' });
 		setIcon(refreshBtn, 'refresh-cw');
-		refreshBtn.setAttribute('aria-label', '새로고침');
+		refreshBtn.setAttribute('aria-label', t(locale, 'refreshAria'));
 		refreshBtn.addEventListener('click', () => this.scheduleRender(noteFile));
 
 		const showBlogLabels = blogs.length > 1;
@@ -145,12 +148,12 @@ export class CommentPreviewManager {
 					cls: 'ramen-comment-blog-name',
 					text: blog.link.replace(/^https?:\/\//, ''),
 				});
-				sectionHeader.createEl('span', { cls: 'ramen-comment-blog-count', text: `${comments.length}개` });
+				sectionHeader.createEl('span', { cls: 'ramen-comment-blog-count', text: t(locale, 'countSuffix', { count: comments.length }) });
 			}
 
 			const list = section.createEl('div', { cls: 'ramen-comment-list' });
 			if (comments.length === 0) {
-				list.createEl('div', { cls: 'ramen-comment-empty', text: '아직 댓글이 없습니다.' });
+				list.createEl('div', { cls: 'ramen-comment-empty', text: t(locale, 'noCommentsYet') });
 			} else {
 				for (const comment of comments) {
 					this.renderCommentItem(list, comment, blog, noteFile);
@@ -167,19 +170,20 @@ export class CommentPreviewManager {
 		blog: BlogConfig,
 		noteFile: TFile,
 	) {
+		const locale = this.plugin.settings.language;
 		const item = container.createEl('div', { cls: 'ramen-comment-item' });
 
 		const meta = item.createEl('div', { cls: 'ramen-comment-meta' });
-		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || '익명' });
-		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at) });
+		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || t(locale, 'anonymous') });
+		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at, locale) });
 
 		const deleteBtn = meta.createEl('button', { cls: 'ramen-comment-delete-btn' });
 		setIcon(deleteBtn, 'trash-2');
-		deleteBtn.setAttribute('aria-label', '댓글 삭제');
+		deleteBtn.setAttribute('aria-label', t(locale, 'deleteCommentAria'));
 		deleteBtn.addEventListener('click', () => {
 			new DeleteCommentModal(this.plugin.app, async (password) => {
 				await this.deleteComment(comment, blog, password, noteFile);
-			}).open();
+			}, locale).open();
 		});
 
 		item.createEl('div', { cls: 'ramen-comment-content', text: comment.content });
@@ -191,6 +195,7 @@ export class CommentPreviewManager {
 		password: string,
 		noteFile: TFile,
 	) {
+		const locale = this.plugin.settings.language;
 		const base = normalizeBlogUrl(blog.link);
 		try {
 			const res = await requestUrl({
@@ -202,15 +207,15 @@ export class CommentPreviewManager {
 			});
 			const body = res.json as { deleted?: boolean };
 			if (res.status === 200 && body.deleted) {
-				new Notice('댓글이 삭제되었습니다.', 3000);
+				new Notice(t(locale, 'commentDeleted'), 3000);
 				this.scheduleRender(noteFile);
 			} else if (res.status === 403) {
-				new Notice('비밀번호가 일치하지 않습니다.', 4000);
+				new Notice(t(locale, 'passwordMismatch'), 4000);
 			} else {
-				new Notice(`삭제 실패 (${res.status})`, 4000);
+				new Notice(t(locale, 'deleteFailed', { status: res.status }), 4000);
 			}
 		} catch (e) {
-			new Notice(`오류: ${String(e)}`, 4000);
+			new Notice(t(locale, 'errorGeneric', { e: String(e) }), 4000);
 		}
 	}
 
@@ -223,10 +228,10 @@ export class CommentPreviewManager {
 	}
 }
 
-export function formatDate(iso: string): string {
+export function formatDate(iso: string, locale: Locale = 'ko'): string {
 	try {
 		const d = new Date(iso);
-		return d.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+		return d.toLocaleDateString(locale === 'ko' ? 'ko-KR' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
 	} catch {
 		return iso;
 	}

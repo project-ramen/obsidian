@@ -9,6 +9,7 @@ import { PullModal } from './commands/pull/PullModal';
 import { PublishModal } from './commands/publish/PublishModal';
 import { ReconnectModal } from './commands/reconnect/ReconnectModal';
 import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
+import { t } from './i18n';
 
 export default class MyPlugin extends Plugin {
 	settings!: MyPluginSettings;
@@ -24,6 +25,10 @@ export default class MyPlugin extends Plugin {
 	private _publishedByPath = new Map<string, string>();
 	/** path → 업로드는 됐지만 아직 비공개(draft)인 블로그 label */
 	private _uploadedOnlyByPath = new Map<string, string>();
+	/** path → 실제로 공개(published) 상태인 블로그 id 집합. 파일 경로가 겹치는 블로그별 상태 구분용 */
+	private _publishedBlogIdsByPath = new Map<string, Set<string>>();
+	/** path → 업로드는 됐지만 비공개(draft)인 블로그 id 집합 */
+	private _uploadedOnlyBlogIdsByPath = new Map<string, Set<string>>();
 	/** 블로그별 마지막 동기화 실패 알림 시각 (스팸 방지) */
 	private _lastSyncFailureNoticeAt = new Map<string, number>();
 	/** 이번 세션에서 서버 검증에 성공한 블로그 rootFolder 집합. 검증된 블로그는 frontmatter 대신 서버 응답을 신뢰함 */
@@ -43,15 +48,15 @@ export default class MyPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'insert-image',
-			name: 'Insert image',
+			name: t(this.settings.language, 'cmdInsertImage'),
 			editorCallback: (editor: Editor) => {
-				new InsertImageModal(this.app, editor).open();
+				new InsertImageModal(this.app, editor, this.settings.language).open();
 			},
 		});
 
 		this.addCommand({
 			id: 'view-all-comments',
-			name: 'View all comments (grouped by blog)',
+			name: t(this.settings.language, 'cmdViewAllComments'),
 			callback: () => {
 				new AllCommentsModal(this.app, this).open();
 			},
@@ -59,13 +64,13 @@ export default class MyPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'sync-posts',
-			name: 'Sync posts to blog',
+			name: t(this.settings.language, 'cmdSyncPosts'),
 			callback: () => { void this.runFullSync(); },
 		});
 
 		this.addCommand({
 			id: 'reconnect-blog',
-			name: 'Reconnect to blog',
+			name: t(this.settings.language, 'cmdReconnectBlog'),
 			callback: () => {
 				const blogs = this.settings.blogs.filter(b => b.link && b.password);
 				if (!blogs.length) return;
@@ -78,13 +83,14 @@ export default class MyPlugin extends Plugin {
 						);
 						void this.saveSettings();
 					},
+					this.settings.language,
 				).open();
 			},
 		});
 
 		this.addCommand({
 			id: 'pull-posts',
-			name: 'Pull posts from blog',
+			name: t(this.settings.language, 'cmdPullPosts'),
 			callback: () => {
 				const blogs = this.settings.blogs.filter(b => b.link && b.password);
 				if (!blogs.length) return;
@@ -92,6 +98,7 @@ export default class MyPlugin extends Plugin {
 					this.app,
 					blogs,
 					(path) => this._pullingPaths.add(path),
+					this.settings.language,
 				).open();
 			},
 		});
@@ -150,11 +157,11 @@ export default class MyPlugin extends Plugin {
 			if (!path) return;
 			const publishedLabel = this._publishedByPath.get(path);
 			if (publishedLabel) {
-				setTooltip(target, `${publishedLabel}에 공개됨`, { placement: 'right' });
+				setTooltip(target, t(this.settings.language, 'tooltipPublishedAt', { label: publishedLabel }), { placement: 'right' });
 				return;
 			}
 			const uploadedLabel = this._uploadedOnlyByPath.get(path);
-			if (uploadedLabel) setTooltip(target, `${uploadedLabel}에 업로드됨 (비공개)`, { placement: 'right' });
+			if (uploadedLabel) setTooltip(target, t(this.settings.language, 'tooltipUploadedAt', { label: uploadedLabel }), { placement: 'right' });
 		});
 
 		this.registerEvent(
@@ -174,26 +181,38 @@ export default class MyPlugin extends Plugin {
 				if (!blogs.length) return;
 
 				const fm = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
-				const isPublished = fm?.published === true || fm?.published === 1;
+				const fmPublished = fm?.published === true || fm?.published === 1;
+
+				// 블로그별 공개 상태 판단: 서버 검증된 블로그는 published 블로그 id 집합을 신뢰,
+				// 아직 검증 안 된 블로그는 frontmatter로 대체 (applyPublishedFileMarkers와 동일한 규칙).
+				const publishedBlogIds = this._publishedBlogIdsByPath.get(abstractFile.path);
+				const privateBlogs = blogs.filter(blog => {
+					const root = blog.rootFolder.replace(/\/+$/, '');
+					const verified = root !== '' && this._verifiedBlogRoots.has(root);
+					const isPublished = verified ? (publishedBlogIds?.has(blog.id) ?? false) : fmPublished;
+					return !isPublished;
+				});
+				const publishedBlogs = blogs.filter(blog => !privateBlogs.includes(blog));
 
 				menu.addSeparator();
 
-				if (!isPublished) {
+				if (privateBlogs.length > 0) {
 					menu.addItem(item => item
-						.setTitle('공개로 전환')
+						.setTitle(t(this.settings.language, 'menuSwitchToPublic'))
 						.setIcon('upload')
-						.onClick(() => void this.togglePostPublished(abstractFile, blogs, true))
+						.onClick(() => void this.togglePostPublished(abstractFile, privateBlogs, true))
 					);
-				} else {
+				}
+				if (publishedBlogs.length > 0) {
 					menu.addItem(item => item
-						.setTitle('비공개로 전환')
+						.setTitle(t(this.settings.language, 'menuSwitchToPrivate'))
 						.setIcon('eye-off')
-						.onClick(() => void this.togglePostPublished(abstractFile, blogs, false))
+						.onClick(() => void this.togglePostPublished(abstractFile, publishedBlogs, false))
 					);
 				}
 
 				menu.addItem(item => item
-					.setTitle('블로그에서 제거')
+					.setTitle(t(this.settings.language, 'menuRemoveFromBlog'))
 					.setIcon('trash-2')
 					.onClick(() => void this.removePostFromBlog(abstractFile, blogs))
 				);
@@ -352,6 +371,8 @@ export default class MyPlugin extends Plugin {
 		const newPublished = new Map<string, string>();
 		const newUploadedOnly = new Map<string, string>();
 		const newVerifiedRoots = new Set<string>();
+		const newPublishedBlogIds = new Map<string, Set<string>>();
+		const newUploadedOnlyBlogIds = new Map<string, Set<string>>();
 
 		for (const blog of blogs) {
 			const root = blog.rootFolder.replace(/\/+$/, '');
@@ -384,9 +405,13 @@ export default class MyPlugin extends Plugin {
 					if (publishedSlugs.has(slug)) {
 						newPublished.set(file.path, label);
 						publishedCount++;
+						if (!newPublishedBlogIds.has(file.path)) newPublishedBlogIds.set(file.path, new Set());
+						newPublishedBlogIds.get(file.path)!.add(blog.id);
 					} else if (uploadedSlugs.has(slug)) {
 						newUploadedOnly.set(file.path, label);
 						uploadedOnlyCount++;
+						if (!newUploadedOnlyBlogIds.has(file.path)) newUploadedOnlyBlogIds.set(file.path, new Set());
+						newUploadedOnlyBlogIds.get(file.path)!.add(blog.id);
 					}
 				}
 				console.log(`[ramen] uploaded 확인 완료: ${label} → 서버 ${posts.length}개 중 공개 ${publishedCount}개 / 업로드전용(비공개) ${uploadedOnlyCount}개 매칭`);
@@ -398,6 +423,8 @@ export default class MyPlugin extends Plugin {
 		this._publishedByPath = newPublished;
 		this._uploadedOnlyByPath = newUploadedOnly;
 		this._verifiedBlogRoots = newVerifiedRoots;
+		this._publishedBlogIdsByPath = newPublishedBlogIds;
+		this._uploadedOnlyBlogIdsByPath = newUploadedOnlyBlogIds;
 		this.applyPublishedFileMarkers();
 	}
 
@@ -411,7 +438,7 @@ export default class MyPlugin extends Plugin {
 	private async syncModifiedFile(file: TFile) {
 		for (const blog of this.blogsForPath(file.path)) {
 			try {
-				await pushFileLive(this.app, blog, file);
+				await pushFileLive(this.app, blog, file, this.settings.language);
 			} catch (e) {
 				const name = blog.rootFolder || blog.link;
 				console.error(`[ramen] live push 실패 (${name}):`, e);
@@ -427,7 +454,7 @@ export default class MyPlugin extends Plugin {
 		if (now - last < 30_000) return;
 		this._lastSyncFailureNoticeAt.set(blog.id, now);
 		const name = blog.rootFolder || blog.link;
-		new Notice(`[${name}] 동기화 실패: ${message}`, 6000);
+		new Notice(t(this.settings.language, 'noticeSyncFailed', { name, message }), 6000);
 	}
 
 	private async syncRenamedFile(file: TFile, oldPath: string, silent = false) {
@@ -440,6 +467,14 @@ export default class MyPlugin extends Plugin {
 			this._uploadedOnlyByPath.set(file.path, this._uploadedOnlyByPath.get(oldPath)!);
 			this._uploadedOnlyByPath.delete(oldPath);
 			this.applyPublishedFileMarkers();
+		}
+		if (this._publishedBlogIdsByPath.has(oldPath)) {
+			this._publishedBlogIdsByPath.set(file.path, this._publishedBlogIdsByPath.get(oldPath)!);
+			this._publishedBlogIdsByPath.delete(oldPath);
+		}
+		if (this._uploadedOnlyBlogIdsByPath.has(oldPath)) {
+			this._uploadedOnlyBlogIdsByPath.set(file.path, this._uploadedOnlyBlogIdsByPath.get(oldPath)!);
+			this._uploadedOnlyBlogIdsByPath.delete(oldPath);
 		}
 
 		const affectedBlogs = new Set([
@@ -466,14 +501,14 @@ export default class MyPlugin extends Plugin {
 
 				// 새 slug 즉시 push — rename은 mtime이 바뀌지 않아 syncBlog의 checkpoint 필터에서 누락됨
 				if (file.path.startsWith(root + '/')) {
-					const newDoc = await fileToPostDoc(this.app, file, blog);
+					const newDoc = await fileToPostDoc(this.app, file, blog, undefined, this.settings.language);
 					if (newDoc) {
 						newDoc.updated_at = now;
 						extraDocs.push(newDoc);
 					}
 				}
 
-				await syncBlog(this.app, blog, extraDocs);
+				await syncBlog(this.app, blog, extraDocs, undefined, this.settings.language);
 				successCount++;
 			} catch (e) {
 				console.error('[ramen] rename sync failed:', e);
@@ -481,7 +516,7 @@ export default class MyPlugin extends Plugin {
 			}
 		}
 		if (successCount > 0 && !silent) {
-			new Notice(`이동 반영됨: ${file.basename}`, 3000);
+			new Notice(t(this.settings.language, 'noticeMoveApplied', { name: file.basename }), 3000);
 		}
 	}
 
@@ -496,7 +531,7 @@ export default class MyPlugin extends Plugin {
 			const oldPath = oldFolderPath + file.path.slice(newFolderPath.length);
 			await this.syncRenamedFile(file, oldPath, true);
 		}
-		new Notice(`폴더 이동 반영: ${files.length}개 파일 동기화됨`, 4000);
+		new Notice(t(this.settings.language, 'noticeFolderMoveApplied', { count: files.length }), 4000);
 	}
 
 	private async syncDeletedFile(file: TFile) {
@@ -521,7 +556,7 @@ export default class MyPlugin extends Plugin {
 		for (const blog of blogs) {
 			console.log(`[ramen] sync 시작: ${blog.rootFolder || blog.link}`);
 			try {
-				await syncBlog(this.app, blog, [], (path) => this._pullingPaths.add(path));
+				await syncBlog(this.app, blog, [], (path) => this._pullingPaths.add(path), this.settings.language);
 				console.log(`[ramen] sync 완료: ${blog.rootFolder || blog.link}`);
 			} catch (e) {
 				console.error(`[ramen] sync 실패: ${blog.rootFolder || blog.link}`, e);
@@ -589,31 +624,43 @@ export default class MyPlugin extends Plugin {
 			if (publish) {
 				this._publishedByPath.set(file.path, label);
 				this._uploadedOnlyByPath.delete(file.path);
+				this._uploadedOnlyBlogIdsByPath.get(file.path)?.delete(blog.id);
+				if (!this._publishedBlogIdsByPath.has(file.path)) this._publishedBlogIdsByPath.set(file.path, new Set());
+				this._publishedBlogIdsByPath.get(file.path)!.add(blog.id);
 			} else {
 				this._publishedByPath.delete(file.path);
 				this._uploadedOnlyByPath.set(file.path, label);
+				this._publishedBlogIdsByPath.get(file.path)?.delete(blog.id);
+				if (!this._uploadedOnlyBlogIdsByPath.has(file.path)) this._uploadedOnlyBlogIdsByPath.set(file.path, new Set());
+				this._uploadedOnlyBlogIdsByPath.get(file.path)!.add(blog.id);
 			}
 			this.applyPublishedFileMarkers();
 		};
 
 		// 겹치는 블로그가 여러 개면 어디에 적용할지 선택하게 함.
 		if (blogs.length > 1) {
-			new PublishModal(this.app, blogs, file, publish, applyResult).open();
+			new PublishModal(this.app, blogs, file, publish, applyResult, this.settings.language).open();
 			return;
 		}
 
 		const blog = blogs[0];
 		if (!blog) return;
 		const name = blog.rootFolder || blog.link;
-		const notice = new Notice(`[${name}] ${publish ? '공개' : '비공개'} 전환 중…`, 0);
+		const notice = new Notice(
+			t(this.settings.language, publish ? 'noticeTogglingPublic' : 'noticeTogglingPrivate', { name }),
+			0,
+		);
 		try {
-			await publishToBlog(this.app, blog, file, publish);
+			await publishToBlog(this.app, blog, file, publish, this.settings.language);
 			notice.hide();
-			new Notice(publish ? '공개로 전환됨' : '비공개로 전환됨', 3000);
+			new Notice(
+				t(this.settings.language, publish ? 'noticeSwitchedToPublic' : 'noticeSwitchedToPrivate'),
+				3000,
+			);
 			applyResult(blog, true);
 		} catch (e) {
 			notice.hide();
-			new Notice(`전환 실패: ${String(e)}`, 8000);
+			new Notice(t(this.settings.language, 'noticeToggleFailed', { e: String(e) }), 8000);
 			applyResult(blog, false);
 		}
 	}
@@ -621,7 +668,7 @@ export default class MyPlugin extends Plugin {
 	private async removePostFromBlog(file: TFile, blogs: BlogConfig[]): Promise<void> {
 		for (const blog of blogs) {
 			const name = blog.rootFolder || blog.link;
-			const notice = new Notice(`[${name}] 제거 중…`, 0);
+			const notice = new Notice(t(this.settings.language, 'noticeRemoving', { name }), 0);
 			try {
 				const base = normalizeBlogUrl(blog.link);
 				const slug = slugFromPath(file.path, blog.rootFolder);
@@ -637,16 +684,18 @@ export default class MyPlugin extends Plugin {
 				});
 				notice.hide();
 				if (res.status >= 200 && res.status < 300) {
-					new Notice(`[${name}] 블로그에서 제거됨`, 3000);
+					new Notice(t(this.settings.language, 'noticeRemoved', { name }), 3000);
 					this._publishedByPath.delete(file.path);
 					this._uploadedOnlyByPath.delete(file.path);
+					this._publishedBlogIdsByPath.get(file.path)?.delete(blog.id);
+					this._uploadedOnlyBlogIdsByPath.get(file.path)?.delete(blog.id);
 					this.applyPublishedFileMarkers();
 				} else {
-					new Notice(`[${name}] 제거 실패 (${res.status})`, 5000);
+					new Notice(t(this.settings.language, 'noticeRemoveFailed', { name, status: res.status }), 5000);
 				}
 			} catch (e) {
 				notice.hide();
-				new Notice(`[${name}] 제거 오류: ${String(e)}`, 5000);
+				new Notice(t(this.settings.language, 'noticeRemoveError', { name, e: String(e) }), 5000);
 			}
 		}
 	}

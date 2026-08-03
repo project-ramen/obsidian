@@ -4,6 +4,7 @@ import { slugFromPath } from '../../sync';
 import { normalizeBlogUrl } from '../../settings/blogs/blog';
 import { BlogConfig } from '../../settings/types';
 import { DeleteCommentModal, formatDate } from '../../comment-preview';
+import { t } from '../../i18n';
 
 interface AllCommentItem {
 	id: number;
@@ -27,22 +28,23 @@ export class AllCommentsModal extends Modal {
 	}
 
 	onOpen() {
-		this.titleEl.setText('전체 댓글');
+		this.titleEl.setText(t(this.plugin.settings.language, 'allCommentsTitle'));
 		this.modalEl.addClass('ramen-all-comments-modal');
 		void this.render();
 	}
 
 	private async render() {
 		const { contentEl } = this;
+		const locale = this.plugin.settings.language;
 		contentEl.empty();
 
 		const blogs = this.plugin.settings.blogs.filter(b => b.link && b.password && b.connectedAt);
 		if (!blogs.length) {
-			contentEl.createEl('p', { cls: 'ramen-comment-empty', text: '연결된 블로그가 없습니다.' });
+			contentEl.createEl('p', { cls: 'ramen-comment-empty', text: t(locale, 'noBlogsConnected') });
 			return;
 		}
 
-		contentEl.createEl('p', { cls: 'ramen-all-comments-loading', text: '불러오는 중…' });
+		contentEl.createEl('p', { cls: 'ramen-all-comments-loading', text: t(locale, 'loading') });
 
 		const results: BlogCommentsResult[] = await Promise.all(
 			blogs.map(async (blog): Promise<BlogCommentsResult> => {
@@ -54,7 +56,7 @@ export class AllCommentsModal extends Modal {
 						headers: { Authorization: `Bearer ${blog.password}` },
 						throw: false,
 					});
-					if (res.status !== 200) return { blog, comments: [], error: `요청 실패 (${res.status})` };
+					if (res.status !== 200) return { blog, comments: [], error: t(locale, 'requestFailed', { status: res.status }) };
 					return { blog, comments: res.json as AllCommentItem[], error: null };
 				} catch (e) {
 					return { blog, comments: [], error: String(e) };
@@ -69,7 +71,7 @@ export class AllCommentsModal extends Modal {
 
 		const totalCount = results.reduce((sum, r) => sum + r.comments.length, 0);
 		if (totalCount === 0 && results.every(r => !r.error)) {
-			contentEl.createEl('p', { cls: 'ramen-comment-empty', text: '아직 댓글이 없습니다.' });
+			contentEl.createEl('p', { cls: 'ramen-comment-empty', text: t(locale, 'noCommentsYet') });
 		}
 
 		for (const result of results) {
@@ -78,6 +80,7 @@ export class AllCommentsModal extends Modal {
 	}
 
 	private renderBlogSection(container: HTMLElement, { blog, comments, error }: BlogCommentsResult) {
+		const locale = this.plugin.settings.language;
 		const section = container.createEl('div', { cls: 'ramen-all-comments-section' });
 
 		const header = section.createEl('div', { cls: 'ramen-all-comments-blog-header' });
@@ -87,13 +90,13 @@ export class AllCommentsModal extends Modal {
 		});
 		header.createEl('span', {
 			cls: 'ramen-all-comments-blog-count',
-			text: error ? error : `${comments.length}개`,
+			text: error ? error : t(locale, 'countSuffix', { count: comments.length }),
 		});
 
 		if (error) return;
 
 		if (comments.length === 0) {
-			section.createEl('div', { cls: 'ramen-comment-empty', text: '댓글 없음' });
+			section.createEl('div', { cls: 'ramen-comment-empty', text: t(locale, 'noComments') });
 			return;
 		}
 
@@ -104,6 +107,7 @@ export class AllCommentsModal extends Modal {
 	}
 
 	private renderCommentItem(container: HTMLElement, comment: AllCommentItem, blog: BlogConfig) {
+		const locale = this.plugin.settings.language;
 		const item = container.createEl('div', { cls: 'ramen-comment-item' });
 
 		const postRow = item.createEl('div', { cls: 'ramen-all-comments-post-row' });
@@ -114,16 +118,16 @@ export class AllCommentsModal extends Modal {
 		postTitle.addEventListener('click', () => void this.openPost(blog, comment.post_slug));
 
 		const meta = item.createEl('div', { cls: 'ramen-comment-meta' });
-		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || '익명' });
-		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at) });
+		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || t(locale, 'anonymous') });
+		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at, locale) });
 
 		const deleteBtn = meta.createEl('button', { cls: 'ramen-comment-delete-btn' });
 		setIcon(deleteBtn, 'trash-2');
-		deleteBtn.setAttribute('aria-label', '댓글 삭제');
+		deleteBtn.setAttribute('aria-label', t(locale, 'deleteCommentAria'));
 		deleteBtn.addEventListener('click', () => {
 			new DeleteCommentModal(this.app, async (password) => {
 				await this.deleteComment(comment, blog, password);
-			}).open();
+			}, locale).open();
 		});
 
 		item.createEl('div', { cls: 'ramen-comment-content', text: comment.content });
@@ -136,7 +140,7 @@ export class AllCommentsModal extends Modal {
 			.filter(f => f.path.startsWith(root + '/'))
 			.find(f => slugFromPath(f.path, blog.rootFolder) === slug);
 		if (!match) {
-			new Notice('vault에서 해당 포스트 파일을 찾을 수 없습니다.', 4000);
+			new Notice(t(this.plugin.settings.language, 'postFileNotFound'), 4000);
 			return;
 		}
 		await this.app.workspace.getLeaf(false).openFile(match);
@@ -144,6 +148,7 @@ export class AllCommentsModal extends Modal {
 	}
 
 	private async deleteComment(comment: AllCommentItem, blog: BlogConfig, password: string) {
+		const locale = this.plugin.settings.language;
 		const base = normalizeBlogUrl(blog.link);
 		try {
 			const res = await requestUrl({
@@ -155,15 +160,15 @@ export class AllCommentsModal extends Modal {
 			});
 			const body = res.json as { deleted?: boolean };
 			if (res.status === 200 && body.deleted) {
-				new Notice('댓글이 삭제되었습니다.', 3000);
+				new Notice(t(locale, 'commentDeleted'), 3000);
 				void this.render();
 			} else if (res.status === 403) {
-				new Notice('비밀번호가 일치하지 않습니다.', 4000);
+				new Notice(t(locale, 'passwordMismatch'), 4000);
 			} else {
-				new Notice(`삭제 실패 (${res.status})`, 4000);
+				new Notice(t(locale, 'deleteFailed', { status: res.status }), 4000);
 			}
 		} catch (e) {
-			new Notice(`오류: ${String(e)}`, 4000);
+			new Notice(t(locale, 'errorGeneric', { e: String(e) }), 4000);
 		}
 	}
 

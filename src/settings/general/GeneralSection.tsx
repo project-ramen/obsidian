@@ -1,10 +1,28 @@
 import React from "react";
-import { SectionProps } from "../types";
+import { SectionProps, MyPluginSettings } from "../types";
 import { SettingRow } from "../components";
 
 export function GeneralSection({ settings, save }: SectionProps) {
 	return (
 		<div>
+			<SettingRow
+				name="Language"
+				description="Plugin display language"
+				control={
+					<select
+						value={settings.language}
+						onChange={(e) =>
+							save({
+								language: e.target
+									.value as MyPluginSettings["language"],
+							})
+						}
+					>
+						<option value="ko">한국어</option>
+						<option value="en">English</option>
+					</select>
+				}
+			/>
 			<SettingRow
 				name="Show dotfiles"
 				description="Show dotfiles only inside root folders"

@@ -1,5 +1,6 @@
 import { App, Notice, TFile, normalizePath, requestUrl } from 'obsidian';
 import { BlogConfig } from './settings/types';
+import { Locale, t } from './i18n';
 
 export interface PostDoc {
 	id: string;
@@ -9,6 +10,8 @@ export interface PostDoc {
 	published: number;
 	tags: string;
 	category: string;
+	banner?: string | null;
+	description?: string | null;
 	deleted_at: string | null;
 	created_at: string;
 	updated_at: string;
@@ -25,7 +28,8 @@ const IMAGE_MIME: Record<string, string> = {
 	webp: 'image/webp',
 	svg: 'image/svg+xml',
 };
-/** 로컬 vault 이미지 → 업로드된 서버 URL 캐시. key: "path:mtime" (플러그인 재로드 시 초기화, 무해함 — 재업로드만 될 뿐). */
+/** 로컬 vault 이미지 → 업로드된 서버 URL 캐시. key: "blogId:path:mtime" (블로그별로 구분 — 같은 이미지를 다른 블로그로 올린 URL이 잘못 재사용되는 것 방지).
+ *  플러그인 재로드 시 초기화, 무해함 — 재업로드만 될 뿐. */
 const uploadedImageCache = new Map<string, string>();
 const STANDARD_IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
 
@@ -47,28 +51,37 @@ function buildMultipartBody(fieldName: string, filename: string, mime: string, d
 }
 
 async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Promise<string | null> {
-	const cacheKey = `${imageFile.path}:${imageFile.stat.mtime}`;
+	const cacheKey = `${blog.id}:${imageFile.path}:${imageFile.stat.mtime}`;
 	const cached = uploadedImageCache.get(cacheKey);
-	if (cached) return cached;
+	if (cached) {
+		console.log(`[ramen] 이미지 업로드 캐시 사용: ${imageFile.path} → ${cached}`);
+		return cached;
+	}
 
+	const target = `${blog.link}/api/uploads`;
+	console.log(`[ramen] 이미지 업로드 시작: ${imageFile.path} (${imageFile.stat.size} bytes) → ${target}`);
 	try {
 		const data = await app.vault.readBinary(imageFile);
 		const ext = imageFile.extension.toLowerCase();
 		const mime = IMAGE_MIME[ext] ?? 'application/octet-stream';
 		const { body, contentType } = buildMultipartBody('file', imageFile.name, mime, data);
 		const res = await requestUrl({
-			url: `${blog.link}/api/uploads`,
+			url: target,
 			method: 'POST',
 			headers: { 'Content-Type': contentType, Authorization: `Bearer ${blog.password}` },
 			body,
 			throw: false,
 		});
 		if (res.status !== 200) {
-			console.warn(`[ramen] 이미지 업로드 실패 (${res.status}): ${imageFile.path}`);
+			console.warn(`[ramen] 이미지 업로드 실패 (${res.status}): ${imageFile.path}`, res.text);
 			return null;
 		}
 		const url = (res.json as { url?: string })?.url;
-		if (!url) return null;
+		if (!url) {
+			console.warn(`[ramen] 이미지 업로드 응답에 url 없음: ${imageFile.path}`, res.text);
+			return null;
+		}
+		console.log(`[ramen] 이미지 업로드 성공: ${imageFile.path} → ${url}`);
 		uploadedImageCache.set(cacheKey, url);
 		return url;
 	} catch (e) {
@@ -95,7 +108,10 @@ async function uploadEmbeddedImages(app: App, file: TFile, blog: BlogConfig, con
 		seen.add(original);
 
 		const resolved = app.metadataCache.getFirstLinkpathDest(embed.link, file.path);
-		if (!(resolved instanceof TFile)) continue;
+		if (!(resolved instanceof TFile)) {
+			console.warn(`[ramen] 본문 임베드 이미지 링크 해석 실패: "${embed.link}" (${file.path})`);
+			continue;
+		}
 		const url = await uploadImageFile(app, blog, resolved);
 		if (!url) continue;
 		result = result.split(original).join(`![${resolved.basename}](${url})`);
@@ -122,6 +138,44 @@ async function uploadEmbeddedImages(app: App, file: TFile, blog: BlogConfig, con
 	}
 
 	return result;
+}
+
+const WIKILINK_RE = /^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
+const MD_IMAGE_RE = /^!\[[^\]]*\]\(([^)\s]+)\)$/;
+
+/**
+ * frontmatter의 banner 값(위키링크 `[[img.png]]`/`![[img.png]]` 또는 표준 `![alt](상대경로)`)이
+ * 로컬 vault 이미지를 가리키면 서버에 업로드하고 그 URL을 반환. 원본 vault 파일(frontmatter)은 건드리지 않음 —
+ * 서버로 보낼 PostDoc에만 적용. 이미 외부 URL/절대경로거나 인식 불가한 형식이면 원본 값 그대로 반환.
+ */
+async function resolveBannerImage(app: App, file: TFile, blog: BlogConfig, raw: string): Promise<string> {
+	const trimmed = raw.trim();
+	if (!trimmed) return trimmed;
+	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith('/')) {
+		console.log(`[ramen] banner: 이미 외부 URL/절대경로라 업로드 스킵: "${trimmed}"`);
+		return trimmed;
+	}
+
+	const linkPath = trimmed.match(WIKILINK_RE)?.[1] ?? trimmed.match(MD_IMAGE_RE)?.[1];
+	if (!linkPath) {
+		console.warn(`[ramen] banner: 인식 가능한 링크 형식이 아님 (그대로 사용): "${trimmed}"`);
+		return trimmed;
+	}
+
+	const ext = linkPath.split('.').pop()?.toLowerCase() ?? '';
+	if (!IMAGE_EXTS.has(ext)) {
+		console.warn(`[ramen] banner: 지원하지 않는 확장자라 업로드 스킵: "${linkPath}"`);
+		return trimmed;
+	}
+
+	const resolved = app.metadataCache.getFirstLinkpathDest(decodeURIComponent(linkPath), file.path);
+	if (!(resolved instanceof TFile)) {
+		console.warn(`[ramen] banner: vault에서 이미지 파일을 찾을 수 없음: "${linkPath}" (${file.path})`);
+		return trimmed;
+	}
+
+	const url = await uploadImageFile(app, blog, resolved);
+	return url ?? trimmed;
 }
 
 export function checkpointKey(blogId: string): string {
@@ -177,7 +231,19 @@ function normalizeTagsValue(raw: unknown): string[] {
 	return [];
 }
 
-export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, contentOverride?: string): Promise<PostDoc | null> {
+/** description frontmatter가 없을 때 본문에서 자동 생성 (프로젝트 목록 카드 요약용). */
+function generateDescription(body: string, maxLen = 90): string {
+	const stripped = body
+		.replace(/```[\s\S]*?```/g, '')
+		.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+		.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+		.replace(/[#>*_`~-]/g, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	return stripped.length > maxLen ? `${stripped.slice(0, maxLen).trim()}…` : stripped;
+}
+
+export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, contentOverride?: string, locale: Locale = 'ko'): Promise<PostDoc | null> {
 	const root = blog.rootFolder.replace(/\/+$/, '');
 	if (!file.path.startsWith(root + '/')) return null;
 
@@ -189,10 +255,26 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 
 	const body_md = await uploadEmbeddedImages(app, file, blog, stripFrontmatter(content));
 
+	const rawBanner = typeof fm['banner'] === 'string' ? fm['banner'].trim() : '';
+	const banner = rawBanner ? await resolveBannerImage(app, file, blog, rawBanner) : null;
+
+	const rawDescription = typeof fm['description'] === 'string' ? fm['description'].trim() : '';
+	let description = rawDescription || null;
+	if (!rawDescription) {
+		const generated = generateDescription(stripFrontmatter(content));
+		if (generated) {
+			description = generated;
+			new Notice(t(locale, 'descriptionFixedNotice', { basename: file.basename, description: generated }), 6000);
+			await app.fileManager.processFrontMatter(file, (frontmatter) => {
+				frontmatter.description = generated;
+			});
+		}
+	}
+
 	const rawTags = fm['tags'];
 	const tags = normalizeTagsValue(rawTags);
 	if (typeof rawTags === 'string' && rawTags.trim()) {
-		new Notice(`"${file.basename}"의 tags 속성은 목록이어야 합니다. 자동으로 고쳤어요: ${tags.join(', ')}`, 6000);
+		new Notice(t(locale, 'tagsFixedNotice', { basename: file.basename, tags: tags.join(', ') }), 6000);
 		await app.fileManager.processFrontMatter(file, (frontmatter) => {
 			frontmatter.tags = tags;
 		});
@@ -206,6 +288,8 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 		published: fm['published'] === true || fm['published'] === 1 ? 1 : 0,
 		tags: JSON.stringify(tags),
 		category: JSON.stringify(category),
+		banner,
+		description,
 		deleted_at: null,
 		created_at: typeof fm['created_at'] === 'string' ? fm['created_at'] : new Date(file.stat.ctime).toISOString(),
 		updated_at: new Date(file.stat.mtime).toISOString(),
@@ -245,6 +329,8 @@ function docToFileContent(doc: PostDoc): string {
 	lines.push(`title: "${doc.title.replace(/"/g, '\\"')}"`);
 	if (tags.length > 0) lines.push(`tags: [${tags.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ')}]`);
 	if (doc.published) lines.push('published: true');
+	if (doc.banner) lines.push(`banner: "${doc.banner.replace(/"/g, '\\"')}"`);
+	if (doc.description) lines.push(`description: "${doc.description.replace(/"/g, '\\"')}"`);
 	lines.push(`created_at: ${doc.created_at}`);
 	lines.push('---', '', doc.body_md);
 	return lines.join('\n');
@@ -287,12 +373,13 @@ export async function pullBlog(
 	blog: BlogConfig,
 	onApply: (path: string) => void,
 	onProgress?: (msg: string) => void,
+	locale: Locale = 'ko',
 ): Promise<PullResult> {
-	onProgress?.('서버에서 문서 목록 가져오는 중…');
+	onProgress?.(t(locale, 'pullFetchingList'));
 	const result = await callSyncApi(blog, [], null);
 
 	const total = result.documents.filter(d => !d.deleted_at).length;
-	const msg = `총 ${total}개 문서 수신 (deleted 포함 ${result.documents.length}개)`;
+	const msg = t(locale, 'pullDocsReceived', { total, all: result.documents.length });
 	onProgress?.(msg);
 	console.log(`[ramen pull] ${msg}`);
 	console.debug('[ramen pull] raw documents:', result.documents);
@@ -327,14 +414,14 @@ export async function pullBlog(
 				onApply(filePath);
 				await app.vault.modify(existing, docToFileContent(doc));
 				updated++;
-				const entry = `[업데이트] ${doc.slug}`;
+				const entry = t(locale, 'pullUpdated', { slug: doc.slug });
 				log.push(entry);
 				onProgress?.(entry);
 				console.log(`[ramen pull] ${entry} (server: ${doc.updated_at}, local: ${new Date(existing.stat.mtime).toISOString()})`);
 			} else {
 				skipped++;
 				const skipMsg = `[스킵] ${doc.slug} (로컬이 최신 — local: ${new Date(existing.stat.mtime).toISOString()}, server: ${doc.updated_at})`;
-				onProgress?.(`[스킵] ${doc.slug} (로컬이 최신)`);
+				onProgress?.(t(locale, 'pullSkipped', { slug: doc.slug }));
 				console.log(`[ramen pull] ${skipMsg}`);
 			}
 		} else {
@@ -345,7 +432,7 @@ export async function pullBlog(
 			onApply(filePath);
 			await app.vault.create(filePath, docToFileContent(doc));
 			created++;
-			const entry = `[생성] ${doc.slug}`;
+			const entry = t(locale, 'pullCreated', { slug: doc.slug });
 			log.push(entry);
 			onProgress?.(entry);
 			console.log(`[ramen pull] ${entry}`);
@@ -361,6 +448,7 @@ export async function syncBlog(
 	blog: BlogConfig,
 	extraDocs: PostDoc[] = [],
 	onApplyPull?: (path: string) => void,
+	locale: Locale = 'ko',
 ): Promise<void> {
 	if (!blog.link || !blog.password) return;
 
@@ -376,7 +464,7 @@ export async function syncBlog(
 
 	const localDocs: PostDoc[] = [...extraDocs];
 	for (const file of filesToPush) {
-		const doc = await fileToPostDoc(app, file, blog);
+		const doc = await fileToPostDoc(app, file, blog, undefined, locale);
 		if (doc) localDocs.push(doc);
 	}
 
@@ -396,11 +484,12 @@ export async function pushFileLive(
 	app: App,
 	blog: BlogConfig,
 	file: TFile,
+	locale: Locale = 'ko',
 ): Promise<void> {
 	if (!blog.link || !blog.password) return;
 
 	const content = await app.vault.cachedRead(file);
-	const doc = await fileToPostDoc(app, file, blog, content);
+	const doc = await fileToPostDoc(app, file, blog, content, locale);
 	if (!doc) return;
 
 	doc.updated_at = new Date().toISOString();
@@ -413,10 +502,10 @@ export async function pushFileLive(
 
 // 특정 블로그 하나에 발행 상태를 명시적으로 반영.
 // 문서가 아직 그 블로그 서버에 없을 수 있으므로 먼저 push(upsert)한 뒤 published를 PATCH.
-export async function publishToBlog(app: App, blog: BlogConfig, file: TFile, publish: boolean): Promise<void> {
-	if (!blog.link || !blog.password) throw new Error('블로그 연결 정보 없음');
+export async function publishToBlog(app: App, blog: BlogConfig, file: TFile, publish: boolean, locale: Locale = 'ko'): Promise<void> {
+	if (!blog.link || !blog.password) throw new Error(t(locale, 'noBlogConnectionInfo'));
 
-	await pushFileLive(app, blog, file);
+	await pushFileLive(app, blog, file, locale);
 
 	const slug = slugFromPath(file.path, blog.rootFolder);
 	const res = await requestUrl({

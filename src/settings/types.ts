@@ -16,6 +16,7 @@ export interface MyPluginSettings {
 	showDotfiles: boolean;
 	dotfilesSync: boolean;
 	hideAttachmentFolder: boolean;
+	language: 'ko' | 'en';
 }
 
 export const DEFAULT_SETTINGS: MyPluginSettings = {
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: MyPluginSettings = {
 	showDotfiles: false,
 	dotfilesSync: false,
 	hideAttachmentFolder: false,
+	language: 'ko',
 };
 
 export interface SectionProps {

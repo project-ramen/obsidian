@@ -1,14 +1,16 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { App, Editor, Modal, TFile } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
+import { Locale, t } from '../../i18n';
 
 interface PickerProps {
 	app: App;
 	imageFiles: TFile[];
 	onSelect: (file: TFile) => void;
+	locale: Locale;
 }
 
-function InsertImagePicker({ app, imageFiles, onSelect }: PickerProps) {
+function InsertImagePicker({ app, imageFiles, onSelect, locale }: PickerProps) {
 	const [query, setQuery] = useState('');
 	const inputRef = useRef<HTMLInputElement>(null);
 
@@ -23,14 +25,14 @@ function InsertImagePicker({ app, imageFiles, onSelect }: PickerProps) {
 				ref={inputRef}
 				className="ramen-insert-image-search"
 				type="text"
-				placeholder="Search images…"
+				placeholder={t(locale, 'insertImageSearchPlaceholder')}
 				value={query}
 				autoFocus
 				onChange={(e) => setQuery(e.target.value)}
 			/>
 
 			{filtered.length === 0 ? (
-				<div className="ramen-insert-image-empty">No images found</div>
+				<div className="ramen-insert-image-empty">{t(locale, 'insertImageNoneFound')}</div>
 			) : (
 				<div className="ramen-insert-image-grid">
 					{filtered.map((file) => (
@@ -58,12 +60,12 @@ function InsertImagePicker({ app, imageFiles, onSelect }: PickerProps) {
 export class InsertImageModal extends Modal {
 	private root: Root | null = null;
 
-	constructor(app: App, private editor: Editor) {
+	constructor(app: App, private editor: Editor, private locale: Locale = 'ko') {
 		super(app);
 	}
 
 	onOpen() {
-		this.titleEl.setText('Insert image');
+		this.titleEl.setText(t(this.locale, 'insertImageTitle'));
 		this.modalEl.addClass('ramen-insert-image-modal');
 
 		const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp']);
@@ -77,6 +79,7 @@ export class InsertImageModal extends Modal {
 			<InsertImagePicker
 				app={this.app}
 				imageFiles={imageFiles}
+				locale={this.locale}
 				onSelect={(file) => {
 					this.editor.replaceSelection(`![[${file.name}]]`);
 					this.close();

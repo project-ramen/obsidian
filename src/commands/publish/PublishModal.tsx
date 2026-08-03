@@ -1,6 +1,7 @@
 import { App, FuzzySuggestModal, Notice, TFile } from 'obsidian';
 import { BlogConfig } from '../../settings/types';
 import { publishToBlog } from '../../sync';
+import { Locale, t } from '../../i18n';
 
 interface BlogOption {
 	blog: BlogConfig | null;
@@ -15,9 +16,12 @@ export class PublishModal extends FuzzySuggestModal<BlogOption> {
 		private file: TFile,
 		private publish: boolean,
 		private onResult: (blog: BlogConfig, ok: boolean) => void,
+		private locale: Locale = 'ko',
 	) {
 		super(app);
-		this.setPlaceholder(publish ? '공개로 전환할 블로그 선택…' : '비공개로 전환할 블로그 선택…');
+		this.setPlaceholder(publish
+			? t(locale, 'publishModalPlaceholderPublic')
+			: t(locale, 'publishModalPlaceholderPrivate'));
 	}
 
 	getItems(): BlogOption[] {
@@ -26,7 +30,12 @@ export class PublishModal extends FuzzySuggestModal<BlogOption> {
 			label: `${blog.rootFolder || 'Untitled'}  ${blog.link}`,
 		}));
 		if (this.blogs.length > 1) {
-			items.push({ blog: null, label: this.publish ? '모든 블로그에 공개' : '모든 블로그에서 비공개' });
+			items.push({
+				blog: null,
+				label: this.publish
+					? t(this.locale, 'publishModalAllBlogsPublic')
+					: t(this.locale, 'publishModalAllBlogsPrivate'),
+			});
 		}
 		return items;
 	}
@@ -44,15 +53,17 @@ export class PublishModal extends FuzzySuggestModal<BlogOption> {
 
 	private async doToggle(blog: BlogConfig): Promise<void> {
 		const name = blog.rootFolder || blog.link;
-		const notice = new Notice(`[${name}] ${this.publish ? '공개' : '비공개'} 전환 중…`, 0);
+		const state = this.publish ? t(this.locale, 'statePublic') : t(this.locale, 'statePrivate');
+		const notice = new Notice(t(this.locale, 'publishModalToggling', { name, state }), 0);
 		try {
-			await publishToBlog(this.app, blog, this.file, this.publish);
+			await publishToBlog(this.app, blog, this.file, this.publish, this.locale);
 			notice.hide();
-			new Notice(`[${name}] ${this.publish ? '공개로 전환됨' : '비공개로 전환됨'}`, 4000);
+			const doneState = this.publish ? t(this.locale, 'statePublicDone') : t(this.locale, 'statePrivateDone');
+			new Notice(t(this.locale, 'publishModalToggled', { name, state: doneState }), 4000);
 			this.onResult(blog, true);
 		} catch (e) {
 			notice.hide();
-			new Notice(`[${name}] 전환 실패: ${String(e)}`, 8000);
+			new Notice(t(this.locale, 'publishModalFailed', { name, e: String(e) }), 8000);
 			this.onResult(blog, false);
 		}
 	}
