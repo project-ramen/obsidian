@@ -3,6 +3,7 @@ import { App, requestUrl } from "obsidian";
 import { BlogConfig, MyPluginSettings, SectionProps } from "../types";
 import { FolderInput, SettingRow } from "../components";
 import { normalizeBlogUrl, persistBlogConnection } from "./blog";
+import { Locale, t } from "../../i18n";
 
 type ConnectStatus = "idle" | "ok" | "error";
 type DotColor = "yellow" | "green" | "red";
@@ -16,6 +17,7 @@ function statusDotColor(status: ConnectStatus): DotColor {
 function BlogItem({
 	blog,
 	app,
+	locale,
 	expanded,
 	onToggle,
 	onUpdate,
@@ -23,6 +25,7 @@ function BlogItem({
 }: {
 	blog: BlogConfig;
 	app: App;
+	locale: Locale;
 	expanded: boolean;
 	onToggle: () => void;
 	onUpdate: (patch: Partial<Omit<BlogConfig, "id">>) => void;
@@ -122,11 +125,11 @@ function BlogItem({
 					className={`ramen-status-dot ramen-status-dot--${dotColor}`}
 				/>
 				<span className="ramen-blog-item-name">
-					{blog.rootFolder || "Untitled blog"}
+					{blog.rootFolder || t(locale, "settingsBlogUntitled")}
 				</span>
 				<button
 					className="ramen-blog-delete-btn"
-					title="Remove"
+					title={t(locale, "settingsBlogRemove")}
 					onClick={(e) => {
 						e.stopPropagation();
 						onDelete();
@@ -139,7 +142,7 @@ function BlogItem({
 			{expanded && (
 				<div className="ramen-blog-item-body">
 					<SettingRow
-						name="Root folder"
+						name={t(locale, "settingsBlogRootFolderName")}
 						control={
 							<FolderInput
 								app={app}
@@ -149,8 +152,8 @@ function BlogItem({
 						}
 					/>
 					<SettingRow
-						name="Link"
-						description="Remote endpoint URL"
+						name={t(locale, "settingsBlogLinkName")}
+						description={t(locale, "settingsBlogLinkDesc")}
 						control={
 							<input
 								type="text"
@@ -169,7 +172,7 @@ function BlogItem({
 						}
 					/>
 					<SettingRow
-						name="Password"
+						name={t(locale, "settingsBlogPasswordName")}
 						control={
 							<input
 								type="password"
@@ -188,8 +191,8 @@ function BlogItem({
 						}
 					/>
 					<SettingRow
-						name="Attachment folder"
-						description="Folder name inside root folder to exclude from sync and hide"
+						name={t(locale, "settingsBlogAttachmentFolderName")}
+						description={t(locale, "settingsBlogAttachmentFolderDesc")}
 						control={
 							<input
 								type="text"
@@ -208,8 +211,8 @@ function BlogItem({
 						}
 					/>
 					<SettingRow
-						name="Project tag"
-						description="Posts with this tag show up under /project instead of /post on the blog"
+						name={t(locale, "settingsBlogProjectTagName")}
+						description={t(locale, "settingsBlogProjectTagDesc")}
 						control={
 							<div className="ramen-project-tag-row">
 								<input
@@ -227,16 +230,18 @@ function BlogItem({
 									}
 									onClick={handleSaveProjectTag}
 								>
-									{savingTag ? "Saving…" : "Save"}
+									{savingTag
+										? t(locale, "settingsBlogSaving")
+										: t(locale, "settingsBlogSave")}
 								</button>
 								{tagStatus === "ok" && (
 									<span className="ramen-connect-status ramen-connect-status--ok">
-										Saved
+										{t(locale, "settingsBlogSaved")}
 									</span>
 								)}
 								{tagStatus === "error" && (
 									<span className="ramen-connect-status ramen-connect-status--error">
-										Failed to save
+										{t(locale, "settingsBlogSaveFailed")}
 									</span>
 								)}
 							</div>
@@ -248,16 +253,18 @@ function BlogItem({
 							disabled={connecting || !blog.link}
 							onClick={handleConnect}
 						>
-							{connecting ? "Connecting…" : "Connect"}
+							{connecting
+								? t(locale, "settingsBlogConnecting")
+								: t(locale, "settingsBlogConnect")}
 						</button>
 						{status === "ok" && (
 							<span className="ramen-connect-status ramen-connect-status--ok">
-								Connected
+								{t(locale, "settingsBlogConnected")}
 							</span>
 						)}
 						{status === "error" && (
 							<span className="ramen-connect-status ramen-connect-status--error">
-								Failed to connect
+								{t(locale, "settingsBlogConnectFailed")}
 							</span>
 						)}
 					</div>
@@ -268,6 +275,7 @@ function BlogItem({
 }
 
 export function BlogsSection({ settings, save, app }: SectionProps) {
+	const locale = settings.language;
 	const [expandedId, setExpandedId] = useState<string | null>(null);
 
 	const addBlog = () => {
@@ -301,7 +309,7 @@ export function BlogsSection({ settings, save, app }: SectionProps) {
 		<div className="ramen-blogs-list">
 			{settings.blogs.length === 0 && (
 				<p className="ramen-blogs-empty">
-					No blogs yet. Add one below.
+					{t(locale, "settingsBlogsEmpty")}
 				</p>
 			)}
 			{settings.blogs.map((blog) => (
@@ -309,6 +317,7 @@ export function BlogsSection({ settings, save, app }: SectionProps) {
 					key={blog.id}
 					blog={blog}
 					app={app}
+					locale={locale}
 					expanded={expandedId === blog.id}
 					onToggle={() =>
 						setExpandedId(expandedId === blog.id ? null : blog.id)
@@ -318,7 +327,7 @@ export function BlogsSection({ settings, save, app }: SectionProps) {
 				/>
 			))}
 			<button className="ramen-blogs-add-btn" onClick={addBlog}>
-				+ Add blog
+				{t(locale, "settingsBlogsAdd")}
 			</button>
 		</div>
 	);

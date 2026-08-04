@@ -10,6 +10,7 @@ import { PublishModal } from './commands/publish/PublishModal';
 import { ReconnectModal } from './commands/reconnect/ReconnectModal';
 import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
 import { t } from './i18n';
+import { debugLog, setDebugMode } from './logger';
 
 export default class MyPlugin extends Plugin {
 	settings!: MyPluginSettings;
@@ -151,7 +152,7 @@ export default class MyPlugin extends Plugin {
 		});
 
 		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
-			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]') as HTMLElement | null;
+			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]');
 			if (!target) return;
 			const path = target.getAttribute('data-path');
 			if (!path) return;
@@ -236,7 +237,7 @@ export default class MyPlugin extends Plugin {
 		this._attachmentFolderStyleEl = null;
 
 		if (!this.settings.hideAttachmentFolder) {
-			console.log('[ramen] attachment folder hiding: 비활성화');
+			debugLog('[ramen] attachment folder hiding: 비활성화');
 			return;
 		}
 
@@ -245,14 +246,14 @@ export default class MyPlugin extends Plugin {
 		// "." → 현재 파일과 같은 폴더
 		// "./name" → 현재 파일 기준 하위 폴더
 		// "path/to/folder" → vault 기준 절대 경로
-		const obsidianPath = (this.app.vault as any).getConfig('attachmentFolderPath') as string ?? '';
+		const obsidianPath = (this.app.vault as unknown).getConfig('attachmentFolderPath') as string ?? '';
 
 		const blogRoots = this.settings.blogs
 			.map(b => b.rootFolder.replace(/\/+$/, ''))
 			.filter(Boolean);
 
 		if (blogRoots.length === 0) {
-			console.log('[ramen] attachment folder hiding: rootFolder 설정된 블로그 없음, 스킵');
+			debugLog('[ramen] attachment folder hiding: rootFolder 설정된 블로그 없음, 스킵');
 			return;
 		}
 
@@ -260,7 +261,7 @@ export default class MyPlugin extends Plugin {
 
 		if (!obsidianPath || obsidianPath === '/' || obsidianPath === '.') {
 			// vault 루트 또는 현재 파일 폴더 → 특정 폴더 식별 불가, 무시
-			console.log(`[ramen] attachment folder hiding: Obsidian 첨부 경로="${obsidianPath}" (vault 루트/동일 폴더), 무시`);
+			debugLog(`[ramen] attachment folder hiding: Obsidian 첨부 경로="${obsidianPath}" (vault 루트/동일 폴더), 무시`);
 			return;
 		} else if (obsidianPath.startsWith('./')) {
 			// subfolder 모드: 각 블로그 rootFolder 아래에 해당 폴더가 생김
@@ -268,15 +269,15 @@ export default class MyPlugin extends Plugin {
 			for (const root of blogRoots) {
 				targetPaths.push(`${root}/${subName}`);
 			}
-			console.log(`[ramen] attachment folder hiding: subfolder 모드 ("${obsidianPath}") → ${targetPaths.join(', ')}`);
+			debugLog(`[ramen] attachment folder hiding: subfolder 모드 ("${obsidianPath}") → ${targetPaths.join(', ')}`);
 		} else {
 			// 절대 경로 모드: 블로그 rootFolder 내부일 때만 숨김
 			for (const root of blogRoots) {
 				if (obsidianPath === root || obsidianPath.startsWith(root + '/')) {
 					targetPaths.push(obsidianPath);
-					console.log(`[ramen] attachment folder hiding: 절대 경로 모드 "${obsidianPath}" → 블로그 root "${root}" 내부, 숨김 적용`);
+					debugLog(`[ramen] attachment folder hiding: 절대 경로 모드 "${obsidianPath}" → 블로그 root "${root}" 내부, 숨김 적용`);
 				} else {
-					console.log(`[ramen] attachment folder hiding: 절대 경로 모드 "${obsidianPath}" → 블로그 root "${root}" 외부, 무시`);
+					debugLog(`[ramen] attachment folder hiding: 절대 경로 모드 "${obsidianPath}" → 블로그 root "${root}" 외부, 무시`);
 				}
 			}
 		}
@@ -288,18 +289,18 @@ export default class MyPlugin extends Plugin {
 		// 실제 DOM에서 매칭 여부 확인
 		for (const p of uniquePaths) {
 			const el = document.querySelector(`.nav-folder > div[data-path="${p}"]`);
-			console.log(`[ramen] attachment folder hiding: DOM 확인 → "${p}" ${el ? '✓ 요소 발견' : '✗ 요소 없음 (아직 렌더링 전이거나 경로 불일치)'}`);
+			debugLog(`[ramen] attachment folder hiding: DOM 확인 → "${p}" ${el ? '✓ 요소 발견' : '✗ 요소 없음 (아직 렌더링 전이거나 경로 불일치)'}`);
 			if (!el) {
 				const allFolders = document.querySelectorAll('.nav-folder > div[data-path]');
 				const samples = Array.from(allFolders).slice(0, 5).map(f => f.getAttribute('data-path'));
-				console.log(`[ramen]   → DOM의 data-path 샘플:`, samples);
+				debugLog(`[ramen]   → DOM의 data-path 샘플:`, samples);
 			}
 		}
 
 		const rules = uniquePaths.map(p =>
 			`.nav-folder:has(> div[data-path="${p}"]) { display: none !important; }`
 		);
-		console.log('[ramen] attachment folder hiding: 주입할 CSS →\n' + rules.join('\n'));
+		debugLog('[ramen] attachment folder hiding: 주입할 CSS →\n' + rules.join('\n'));
 		this._attachmentFolderStyleEl = document.createElement('style');
 		this._attachmentFolderStyleEl.textContent = rules.join('\n');
 		document.head.appendChild(this._attachmentFolderStyleEl);
@@ -319,7 +320,7 @@ export default class MyPlugin extends Plugin {
 				.filter(f => f.path.startsWith(root + '/'));
 
 			const verified = this._verifiedBlogRoots.has(root);
-			console.log(`[ramen] marker: ${root} → ${files.length}개 파일 검사 (서버 검증: ${verified ? 'O' : 'X, frontmatter로 대체'})`);
+			debugLog(`[ramen] marker: ${root} → ${files.length}개 파일 검사 (서버 검증: ${verified ? 'O' : 'X, frontmatter로 대체'})`);
 
 			for (const file of files) {
 				let isPublished = false;
@@ -332,7 +333,7 @@ export default class MyPlugin extends Plugin {
 					const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
 					const pub = fm?.published;
 					if (pub !== undefined) {
-						console.log(`[ramen] marker: ${file.path} published=${JSON.stringify(pub)} (${typeof pub})`);
+						debugLog(`[ramen] marker: ${file.path} published=${JSON.stringify(pub)} (${typeof pub})`);
 					}
 					isPublished = pub === true || pub === 1;
 				}
@@ -350,7 +351,7 @@ export default class MyPlugin extends Plugin {
 			}
 		}
 
-		console.log(`[ramen] marker: 생성된 rules ${rules.length}개`);
+		debugLog(`[ramen] marker: 생성된 rules ${rules.length}개`);
 		if (rules.length === 0) return;
 
 		this._publishedMarkerStyleEl = document.createElement('style');
@@ -388,7 +389,7 @@ export default class MyPlugin extends Plugin {
 					throw: false,
 				});
 				if (res.status !== 200) {
-					console.log(`[ramen] uploaded 확인 실패 (${res.status}): ${label}`);
+					debugLog(`[ramen] uploaded 확인 실패 (${res.status}): ${label}`);
 					continue;
 				}
 
@@ -414,9 +415,9 @@ export default class MyPlugin extends Plugin {
 						newUploadedOnlyBlogIds.get(file.path)!.add(blog.id);
 					}
 				}
-				console.log(`[ramen] uploaded 확인 완료: ${label} → 서버 ${posts.length}개 중 공개 ${publishedCount}개 / 업로드전용(비공개) ${uploadedOnlyCount}개 매칭`);
+				debugLog(`[ramen] uploaded 확인 완료: ${label} → 서버 ${posts.length}개 중 공개 ${publishedCount}개 / 업로드전용(비공개) ${uploadedOnlyCount}개 매칭`);
 			} catch (e) {
-				console.log(`[ramen] uploaded 확인 오류: ${label}`, e);
+				debugLog(`[ramen] uploaded 확인 오류: ${label}`, e);
 			}
 		}
 
@@ -481,7 +482,7 @@ export default class MyPlugin extends Plugin {
 			...this.blogsForPath(file.path),
 			...this.blogsForPath(oldPath),
 		]);
-		console.log(`[ramen] 파일 이동/이름변경 감지: "${oldPath}" → "${file.path}" (매칭 블로그 ${affectedBlogs.size}개)`);
+		debugLog(`[ramen] 파일 이동/이름변경 감지: "${oldPath}" → "${file.path}" (매칭 블로그 ${affectedBlogs.size}개)`);
 		if (affectedBlogs.size === 0) return;
 
 		const now = new Date().toISOString();
@@ -525,7 +526,7 @@ export default class MyPlugin extends Plugin {
 		const newFolderPath = folder.path;
 		const files = this.app.vault.getMarkdownFiles()
 			.filter(f => f.path.startsWith(newFolderPath + '/'));
-		console.log(`[ramen] 폴더 이동 감지: "${oldFolderPath}" → "${newFolderPath}" (md 파일 ${files.length}개)`);
+		debugLog(`[ramen] 폴더 이동 감지: "${oldFolderPath}" → "${newFolderPath}" (md 파일 ${files.length}개)`);
 		if (files.length === 0) return;
 		for (const file of files) {
 			const oldPath = oldFolderPath + file.path.slice(newFolderPath.length);
@@ -549,32 +550,33 @@ export default class MyPlugin extends Plugin {
 	async runFullSync({ startup = false }: { startup?: boolean } = {}) {
 		const blogs = this.settings.blogs.filter(b => b.link && b.password && b.connectedAt);
 		if (!blogs.length) {
-			if (startup) console.log('[ramen] 시작 시 자동 sync: 연결된 블로그 없음, 스킵');
+			if (startup) debugLog('[ramen] 시작 시 자동 sync: 연결된 블로그 없음, 스킵');
 			return;
 		}
-		if (startup) console.log(`[ramen] 시작 시 자동 sync 시작 (${blogs.length}개 블로그)`);
+		if (startup) debugLog(`[ramen] 시작 시 자동 sync 시작 (${blogs.length}개 블로그)`);
 		for (const blog of blogs) {
-			console.log(`[ramen] sync 시작: ${blog.rootFolder || blog.link}`);
+			debugLog(`[ramen] sync 시작: ${blog.rootFolder || blog.link}`);
 			try {
 				await syncBlog(this.app, blog, [], (path) => this._pullingPaths.add(path), this.settings.language);
-				console.log(`[ramen] sync 완료: ${blog.rootFolder || blog.link}`);
+				debugLog(`[ramen] sync 완료: ${blog.rootFolder || blog.link}`);
 			} catch (e) {
 				console.error(`[ramen] sync 실패: ${blog.rootFolder || blog.link}`, e);
 			}
 		}
-		if (startup) console.log('[ramen] 시작 시 자동 sync 완료');
+		if (startup) debugLog('[ramen] 시작 시 자동 sync 완료');
 	}
 
 	async loadSettings() {
 		const saved = await this.loadData() as Partial<MyPluginSettings>;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+		setDebugMode(this.settings.debugMode);
 		this.settings.blogs = this.settings.blogs.map(b => {
 			const migrated = !b.attachmentFolder;
 			const blog = { ...b, attachmentFolder: b.attachmentFolder || 'attachments' };
-			if (migrated) console.log(`[ramen] loadSettings: attachmentFolder 기본값 적용 → ${blog.rootFolder || blog.id}`);
+			if (migrated) debugLog(`[ramen] loadSettings: attachmentFolder 기본값 적용 → ${blog.rootFolder || blog.id}`);
 			return blog;
 		});
-		console.log(`[ramen] loadSettings 완료: 블로그 ${this.settings.blogs.length}개, hideAttachmentFolder=${this.settings.hideAttachmentFolder}`);
+		debugLog(`[ramen] loadSettings 완료: 블로그 ${this.settings.blogs.length}개, hideAttachmentFolder=${this.settings.hideAttachmentFolder}`);
 	}
 
 	private async tryConnectBlogsAtStartup(): Promise<void> {
@@ -596,28 +598,47 @@ export default class MyPlugin extends Plugin {
 						b.id === blog.id ? { ...b, link: base, connectedAt: new Date().toISOString() } : b
 					);
 					persistBlogConnection(blog.rootFolder, base, blog.password);
-					console.log(`[ramen] startup connect 성공: ${blog.rootFolder || blog.link}`);
+					debugLog(`[ramen] startup connect 성공: ${blog.rootFolder || blog.link}`);
 					changed = true;
 				} else {
-					console.log(`[ramen] startup connect 실패 (${res.status}): ${blog.rootFolder || blog.link}`);
+					debugLog(`[ramen] startup connect 실패 (${res.status}): ${blog.rootFolder || blog.link}`);
 				}
 			} catch (e) {
-				console.log(`[ramen] startup connect 오류: ${blog.rootFolder || blog.link}`, e);
+				debugLog(`[ramen] startup connect 오류: ${blog.rootFolder || blog.link}`, e);
 			}
 		}
 		if (changed) await this.saveSettings();
 	}
 
-	private async togglePostPublished(file: TFile, blogs: BlogConfig[], publish: boolean): Promise<void> {
+	/**
+	 * 검증된 블로그는 published/uploaded-only 기록을 신뢰(정확한 참/거짓).
+	 * 한 번도 기록이 없는 미검증 블로그는 유실 방지를 위해 공개 상태로 간주.
+	 */
+	private isBlogPublishedForFile(filePath: string, blog: BlogConfig): boolean {
+		if (this._publishedBlogIdsByPath.get(filePath)?.has(blog.id)) return true;
+		if (this._uploadedOnlyBlogIdsByPath.get(filePath)?.has(blog.id)) return false;
+		const root = blog.rootFolder.replace(/\/+$/, '');
+		const verified = root !== '' && this._verifiedBlogRoots.has(root);
+		return !verified;
+	}
+
+	/** 이 파일에 연결된 블로그 중 하나라도 공개 상태면 frontmatter published를 유지, 아니면 제거. */
+	private async syncPublishedFrontmatter(file: TFile): Promise<void> {
+		const connected = this.blogsForPath(file.path).filter(b => b.link && b.password && b.connectedAt);
+		const anyPublished = connected.some(b => this.isBlogPublishedForFile(file.path, b));
 		await this.app.fileManager.processFrontMatter(file, fm => {
-			if (publish) {
+			if (anyPublished) {
 				fm['published'] = true;
 			} else {
 				delete fm['published'];
 			}
 		});
+	}
 
-		// 실제로 published 상태가 반영된 블로그만 마커/툴팁에 표시.
+	private async togglePostPublished(file: TFile, blogs: BlogConfig[], publish: boolean): Promise<void> {
+		// 실제로 서버 반영에 성공한 블로그만 마커/툴팁/frontmatter에 반영.
+		// (재빌드/네트워크 오류 등으로 실패하면 아무 상태도 건드리지 않음 — 이전엔 결과와 무관하게
+		//  frontmatter를 먼저 지워버려서, 실패해도 published가 사라지는 문제가 있었음)
 		const applyResult = (blog: BlogConfig, ok: boolean) => {
 			if (!ok) return;
 			const label = blog.rootFolder || blog.link;
@@ -635,6 +656,7 @@ export default class MyPlugin extends Plugin {
 				this._uploadedOnlyBlogIdsByPath.get(file.path)!.add(blog.id);
 			}
 			this.applyPublishedFileMarkers();
+			void this.syncPublishedFrontmatter(file);
 		};
 
 		// 겹치는 블로그가 여러 개면 어디에 적용할지 선택하게 함.
@@ -701,6 +723,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async saveSettings() {
+		setDebugMode(this.settings.debugMode);
 		await this.saveData(this.settings);
 	}
 }

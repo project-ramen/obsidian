@@ -2,6 +2,7 @@ import { App, FuzzySuggestModal, Notice } from 'obsidian';
 import { BlogConfig } from '../../settings/types';
 import { pullBlog } from '../../sync';
 import { Locale, t } from '../../i18n';
+import { debugLog } from '../../logger';
 
 interface BlogOption {
 	blog: BlogConfig | null;
@@ -53,7 +54,7 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 				this.onApply,
 				(msg) => {
 					notice.setMessage(`[${name}] ${msg}`);
-					console.log(msg);
+					debugLog(msg);
 				},
 				this.locale,
 			);
@@ -61,8 +62,8 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 			notice.hide();
 
 			const summary = t(this.locale, 'pullSummary', { created, updated, skipped });
-			console.log(summary);
-			if (log.length > 0) console.log('변경 파일:\n' + log.join('\n'));
+			debugLog(summary);
+			if (log.length > 0) debugLog('변경 파일:\n' + log.join('\n'));
 			console.groupEnd();
 
 			new Notice(`[${name}] ${summary}`, 6000);

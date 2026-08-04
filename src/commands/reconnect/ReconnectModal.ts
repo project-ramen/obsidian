@@ -2,6 +2,7 @@ import { App, FuzzySuggestModal, Notice, requestUrl } from 'obsidian';
 import { BlogConfig } from '../../settings/types';
 import { normalizeBlogUrl, persistBlogConnection } from '../../settings/blogs/blog';
 import { Locale, t } from '../../i18n';
+import { debugLog } from '../../logger';
 
 interface BlogOption {
 	blog: BlogConfig | null;
@@ -58,7 +59,7 @@ export class ReconnectModal extends FuzzySuggestModal<BlogOption> {
 				persistBlogConnection(blog.rootFolder, base, blog.password);
 				this.onReconnected(blog.id, connectedAt);
 				new Notice(t(this.locale, 'reconnectSuccess', { name }), 4000);
-				console.log(`[ramen] reconnect 성공: ${name}`);
+				debugLog(`[ramen] reconnect 성공: ${name}`);
 			} else {
 				new Notice(t(this.locale, 'reconnectFailed', { name, status: res.status }), 6000);
 				console.warn(`[ramen] reconnect 실패 (${res.status}): ${name}`);

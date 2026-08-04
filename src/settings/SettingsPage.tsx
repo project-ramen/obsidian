@@ -5,6 +5,7 @@ import MyPlugin from "../main";
 import { BlogsSection } from "./blogs/BlogsSection";
 import { AppearanceSection } from "./appearance/AppearanceSection";
 import { GeneralSection } from "./general/GeneralSection";
+import { t } from "../i18n";
 
 type Section = "blogs" | "appearance" | "general";
 
@@ -12,6 +13,15 @@ const SECTION_ICONS: Record<Section, string> = {
 	blogs: "rss",
 	appearance: "palette",
 	general: "settings-2",
+};
+
+const SECTION_LABEL_KEYS: Record<
+	Section,
+	"settingsNavBlogs" | "settingsNavAppearance" | "settingsNavGeneral"
+> = {
+	blogs: "settingsNavBlogs",
+	appearance: "settingsNavAppearance",
+	general: "settingsNavGeneral",
 };
 
 function NavIcon({ id }: { id: string }) {
@@ -55,7 +65,7 @@ export function SettingsPage({ plugin }: { plugin: MyPlugin }) {
 						onClick={() => setActive(s)}
 					>
 						<NavIcon id={SECTION_ICONS[s]} />
-						<span>{s.charAt(0).toUpperCase() + s.slice(1)}</span>
+						<span>{t(settings.language, SECTION_LABEL_KEYS[s])}</span>
 					</button>
 				))}
 			</nav>

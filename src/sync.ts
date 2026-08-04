@@ -1,6 +1,7 @@
 import { App, Notice, TFile, normalizePath, requestUrl } from 'obsidian';
 import { BlogConfig } from './settings/types';
 import { Locale, t } from './i18n';
+import { debugLog } from './logger';
 
 export interface PostDoc {
 	id: string;
@@ -34,6 +35,11 @@ const IMAGE_MIME: Record<string, string> = {
 const uploadedImageCache = new Map<string, string>();
 const STANDARD_IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
 
+/** blogId:filePath → pushFileLive가 마지막으로 보낸 updated_at. 이후 sync가 같은 문서를 pull해오면
+ *  (서버가 우리가 방금 보낸 그 push를 그대로 되돌려준 echo) 로컬 파일을 덮어쓰지 않도록 구분하는 용도.
+ *  이게 없으면 banner의 원본 [[link.png]] 위키링크가 서버에 업로드된 URL로 되돌아와 파일을 덮어써버림. */
+const lastLivePushedAt = new Map<string, string>();
+
 /** Obsidian requestUrl은 FormData를 지원하지 않아 multipart/form-data 바디를 직접 구성. */
 function buildMultipartBody(fieldName: string, filename: string, mime: string, data: ArrayBuffer): { body: ArrayBuffer; contentType: string } {
 	const boundary = `----ramenBoundary${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
@@ -55,12 +61,12 @@ async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Pr
 	const cacheKey = `${blog.id}:${imageFile.path}:${imageFile.stat.mtime}`;
 	const cached = uploadedImageCache.get(cacheKey);
 	if (cached) {
-		console.log(`[ramen] 이미지 업로드 캐시 사용: ${imageFile.path} → ${cached}`);
+		debugLog(`[ramen] 이미지 업로드 캐시 사용: ${imageFile.path} → ${cached}`);
 		return cached;
 	}
 
 	const target = `${blog.link}/api/uploads`;
-	console.log(`[ramen] 이미지 업로드 시작: ${imageFile.path} (${imageFile.stat.size} bytes) → ${target}`);
+	debugLog(`[ramen] 이미지 업로드 시작: ${imageFile.path} (${imageFile.stat.size} bytes) → ${target}`);
 	try {
 		const data = await app.vault.readBinary(imageFile);
 		const ext = imageFile.extension.toLowerCase();
@@ -82,7 +88,7 @@ async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Pr
 			console.warn(`[ramen] 이미지 업로드 응답에 url 없음: ${imageFile.path}`, res.text);
 			return null;
 		}
-		console.log(`[ramen] 이미지 업로드 성공: ${imageFile.path} → ${url}`);
+		debugLog(`[ramen] 이미지 업로드 성공: ${imageFile.path} → ${url}`);
 		uploadedImageCache.set(cacheKey, url);
 		return url;
 	} catch (e) {
@@ -153,7 +159,7 @@ async function resolveBannerImage(app: App, file: TFile, blog: BlogConfig, raw: 
 	const trimmed = raw.trim();
 	if (!trimmed) return trimmed;
 	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith('/')) {
-		console.log(`[ramen] banner: 이미 외부 URL/절대경로라 업로드 스킵: "${trimmed}"`);
+		debugLog(`[ramen] banner: 이미 외부 URL/절대경로라 업로드 스킵: "${trimmed}"`);
 		return trimmed;
 	}
 
@@ -262,9 +268,20 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 	const rawBannerUrl = typeof fm['banner-url'] === 'string' ? fm['banner-url'].trim() : '';
 	const banner_url = rawBannerUrl || null;
 
+	const rawTags = fm['tags'];
+	const tags = normalizeTagsValue(rawTags);
+	if (typeof rawTags === 'string' && rawTags.trim()) {
+		new Notice(t(locale, 'tagsFixedNotice', { basename: file.basename, tags: tags.join(', ') }), 6000);
+		await app.fileManager.processFrontMatter(file, (frontmatter) => {
+			frontmatter.tags = tags;
+		});
+	}
+
+	const isProjectPost = !!blog.projectTag && tags.includes(blog.projectTag);
+
 	const rawDescription = typeof fm['description'] === 'string' ? fm['description'].trim() : '';
 	let description = rawDescription || null;
-	if (!rawDescription) {
+	if (!rawDescription && isProjectPost) {
 		const generated = generateDescription(stripFrontmatter(content));
 		if (generated) {
 			description = generated;
@@ -273,15 +290,6 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 				frontmatter.description = generated;
 			});
 		}
-	}
-
-	const rawTags = fm['tags'];
-	const tags = normalizeTagsValue(rawTags);
-	if (typeof rawTags === 'string' && rawTags.trim()) {
-		new Notice(t(locale, 'tagsFixedNotice', { basename: file.basename, tags: tags.join(', ') }), 6000);
-		await app.fileManager.processFrontMatter(file, (frontmatter) => {
-			frontmatter.tags = tags;
-		});
 	}
 
 	return {
@@ -358,6 +366,8 @@ async function applyPulledDocs(
 		const file = app.vault.getAbstractFileByPath(filePath);
 		if (!(file instanceof TFile)) continue;
 
+		if (lastLivePushedAt.get(`${blog.id}:${filePath}`) === doc.updated_at) continue;
+
 		const serverMtime = new Date(doc.updated_at).getTime();
 		if (serverMtime <= file.stat.mtime) continue;
 
@@ -387,7 +397,7 @@ export async function pullBlog(
 	const total = result.documents.filter(d => !d.deleted_at).length;
 	const msg = t(locale, 'pullDocsReceived', { total, all: result.documents.length });
 	onProgress?.(msg);
-	console.log(`[ramen pull] ${msg}`);
+	debugLog(`[ramen pull] ${msg}`);
 	console.debug('[ramen pull] raw documents:', result.documents);
 
 	let created = 0;
@@ -415,20 +425,21 @@ export async function pullBlog(
 		});
 
 		if (existing instanceof TFile) {
+			const isOwnEcho = lastLivePushedAt.get(`${blog.id}:${existing.path}`) === doc.updated_at;
 			const serverMtime = new Date(doc.updated_at).getTime();
-			if (serverMtime > existing.stat.mtime) {
+			if (!isOwnEcho && serverMtime > existing.stat.mtime) {
 				onApply(filePath);
 				await app.vault.modify(existing, docToFileContent(doc));
 				updated++;
 				const entry = t(locale, 'pullUpdated', { slug: doc.slug });
 				log.push(entry);
 				onProgress?.(entry);
-				console.log(`[ramen pull] ${entry} (server: ${doc.updated_at}, local: ${new Date(existing.stat.mtime).toISOString()})`);
+				debugLog(`[ramen pull] ${entry} (server: ${doc.updated_at}, local: ${new Date(existing.stat.mtime).toISOString()})`);
 			} else {
 				skipped++;
 				const skipMsg = `[스킵] ${doc.slug} (로컬이 최신 — local: ${new Date(existing.stat.mtime).toISOString()}, server: ${doc.updated_at})`;
 				onProgress?.(t(locale, 'pullSkipped', { slug: doc.slug }));
-				console.log(`[ramen pull] ${skipMsg}`);
+				debugLog(`[ramen pull] ${skipMsg}`);
 			}
 		} else {
 			const dir = filePath.substring(0, filePath.lastIndexOf('/'));
@@ -441,7 +452,7 @@ export async function pullBlog(
 			const entry = t(locale, 'pullCreated', { slug: doc.slug });
 			log.push(entry);
 			onProgress?.(entry);
-			console.log(`[ramen pull] ${entry}`);
+			debugLog(`[ramen pull] ${entry}`);
 		}
 	}
 
@@ -499,8 +510,9 @@ export async function pushFileLive(
 	if (!doc) return;
 
 	doc.updated_at = new Date().toISOString();
+	lastLivePushedAt.set(`${blog.id}:${file.path}`, doc.updated_at);
 
-	console.log(`[ramen] live push: ${doc.slug}`);
+	debugLog(`[ramen] live push: ${doc.slug}`);
 	const checkpoint = localStorage.getItem(checkpointKey(blog.id)) ?? null;
 	const result = await callSyncApi(blog, [doc], checkpoint);
 	localStorage.setItem(checkpointKey(blog.id), result.checkpoint);

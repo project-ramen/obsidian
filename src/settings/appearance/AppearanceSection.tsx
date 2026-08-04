@@ -1,13 +1,15 @@
 import React from "react";
 import { SectionProps, MyPluginSettings } from "../types";
 import { SettingRow } from "../components";
+import { t } from "../../i18n";
 
 export function AppearanceSection({ settings, save }: SectionProps) {
+	const locale = settings.language;
 	return (
 		<div>
 			<SettingRow
-				name="Theme color"
-				description="Override the app theme or follow Obsidian's setting"
+				name={t(locale, "settingsThemeColorName")}
+				description={t(locale, "settingsThemeColorDesc")}
 				control={
 					<select
 						value={settings.themeColor}
@@ -18,15 +20,17 @@ export function AppearanceSection({ settings, save }: SectionProps) {
 							})
 						}
 					>
-						<option value="system">Follow Obsidian</option>
-						<option value="dark">Dark</option>
-						<option value="light">Light</option>
+						<option value="system">
+							{t(locale, "settingsThemeFollowObsidian")}
+						</option>
+						<option value="dark">{t(locale, "settingsThemeDark")}</option>
+						<option value="light">{t(locale, "settingsThemeLight")}</option>
 					</select>
 				}
 			/>
 			<SettingRow
-				name="Attachment location"
-				description="Where the attachment preview strip appears in file views"
+				name={t(locale, "settingsAttachmentLocationName")}
+				description={t(locale, "settingsAttachmentLocationDesc")}
 				control={
 					<select
 						value={settings.attachmentLocation}
@@ -37,14 +41,18 @@ export function AppearanceSection({ settings, save }: SectionProps) {
 							})
 						}
 					>
-						<option value="bottom">Bottom</option>
-						<option value="top">Top</option>
+						<option value="bottom">
+							{t(locale, "settingsAttachmentLocationBottom")}
+						</option>
+						<option value="top">
+							{t(locale, "settingsAttachmentLocationTop")}
+						</option>
 					</select>
 				}
 			/>
 			<SettingRow
-				name="Hide attachment folder"
-				description="Hide each blog's attachment folder from the file explorer"
+				name={t(locale, "settingsHideAttachmentFolderName")}
+				description={t(locale, "settingsHideAttachmentFolderDesc")}
 				control={
 					<div
 						className={`checkbox-container${settings.hideAttachmentFolder ? " is-enabled" : ""}`}
