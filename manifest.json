@@ -1,7 +1,7 @@
 {
 	"id": "ramen-client",
 	"name": "Ramen Blog Writer",
-	"version": "0.0.1",
+	"version": "1.5.1",
 	"minAppVersion": "0.15.0",
 	"description": "plugin for managing ramen blog",
 	"author": "Dennis Ko",

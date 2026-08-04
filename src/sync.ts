@@ -11,6 +11,7 @@ export interface PostDoc {
 	tags: string;
 	category: string;
 	banner?: string | null;
+	banner_url?: string | null;
 	description?: string | null;
 	deleted_at: string | null;
 	created_at: string;
@@ -258,6 +259,9 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 	const rawBanner = typeof fm['banner'] === 'string' ? fm['banner'].trim() : '';
 	const banner = rawBanner ? await resolveBannerImage(app, file, blog, rawBanner) : null;
 
+	const rawBannerUrl = typeof fm['banner-url'] === 'string' ? fm['banner-url'].trim() : '';
+	const banner_url = rawBannerUrl || null;
+
 	const rawDescription = typeof fm['description'] === 'string' ? fm['description'].trim() : '';
 	let description = rawDescription || null;
 	if (!rawDescription) {
@@ -289,6 +293,7 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 		tags: JSON.stringify(tags),
 		category: JSON.stringify(category),
 		banner,
+		banner_url,
 		description,
 		deleted_at: null,
 		created_at: typeof fm['created_at'] === 'string' ? fm['created_at'] : new Date(file.stat.ctime).toISOString(),
@@ -330,6 +335,7 @@ function docToFileContent(doc: PostDoc): string {
 	if (tags.length > 0) lines.push(`tags: [${tags.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ')}]`);
 	if (doc.published) lines.push('published: true');
 	if (doc.banner) lines.push(`banner: "${doc.banner.replace(/"/g, '\\"')}"`);
+	if (doc.banner_url) lines.push(`banner-url: "${doc.banner_url.replace(/"/g, '\\"')}"`);
 	if (doc.description) lines.push(`description: "${doc.description.replace(/"/g, '\\"')}"`);
 	lines.push(`created_at: ${doc.created_at}`);
 	lines.push('---', '', doc.body_md);
