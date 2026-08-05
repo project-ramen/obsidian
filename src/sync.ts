@@ -268,11 +268,11 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 	const rawBannerUrl = typeof fm['banner-url'] === 'string' ? fm['banner-url'].trim() : '';
 	const banner_url = rawBannerUrl || null;
 
-	const rawTags = fm['tags'];
+	const rawTags: unknown = fm['tags'];
 	const tags = normalizeTagsValue(rawTags);
 	if (typeof rawTags === 'string' && rawTags.trim()) {
 		new Notice(t(locale, 'tagsFixedNotice', { basename: file.basename, tags: tags.join(', ') }), 6000);
-		await app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await app.fileManager.processFrontMatter(file, (frontmatter: { tags?: string[] }) => {
 			frontmatter.tags = tags;
 		});
 	}
@@ -286,7 +286,7 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 		if (generated) {
 			description = generated;
 			new Notice(t(locale, 'descriptionFixedNotice', { basename: file.basename, description: generated }), 6000);
-			await app.fileManager.processFrontMatter(file, (frontmatter) => {
+			await app.fileManager.processFrontMatter(file, (frontmatter: { description?: string }) => {
 				frontmatter.description = generated;
 			});
 		}

@@ -1,5 +1,5 @@
 import { App, MarkdownView, Modal, Notice, TFile, requestUrl, setIcon } from 'obsidian';
-import MyPlugin from './main';
+import RamenPlugin from './main';
 import { slugFromPath } from './sync';
 import { normalizeBlogUrl } from './settings/blogs/blog';
 import { BlogConfig } from './settings/types';
@@ -57,7 +57,7 @@ export class DeleteCommentModal extends Modal {
 export class CommentPreviewManager {
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 
-	constructor(private plugin: MyPlugin) {}
+	constructor(private plugin: RamenPlugin) {}
 
 	register() {
 		this.plugin.registerEvent(

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { setIcon } from "obsidian";
-import { MyPluginSettings } from "./types";
-import MyPlugin from "../main";
+import { RamenPluginSettings } from "./types";
+import RamenPlugin from "../main";
 import { BlogsSection } from "./blogs/BlogsSection";
 import { AppearanceSection } from "./appearance/AppearanceSection";
 import { GeneralSection } from "./general/GeneralSection";
@@ -32,13 +32,13 @@ function NavIcon({ id }: { id: string }) {
 	return <span ref={ref} className="ramen-nav-icon" />;
 }
 
-export function SettingsPage({ plugin }: { plugin: MyPlugin }) {
+export function SettingsPage({ plugin }: { plugin: RamenPlugin }) {
 	const [active, setActive] = useState<Section>("blogs");
-	const [settings, setSettings] = useState<MyPluginSettings>({
+	const [settings, setSettings] = useState<RamenPluginSettings>({
 		...plugin.settings,
 	});
 
-	const save = async (patch: Partial<MyPluginSettings>) => {
+	const save = async (patch: Partial<RamenPluginSettings>) => {
 		Object.assign(plugin.settings, patch);
 		await plugin.saveSettings();
 		setSettings({ ...plugin.settings });

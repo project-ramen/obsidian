@@ -35,7 +35,11 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 		return item.label;
 	}
 
-	async onChooseItem(item: BlogOption): Promise<void> {
+	onChooseItem(item: BlogOption): void {
+		void this.handleChooseItem(item);
+	}
+
+	private async handleChooseItem(item: BlogOption): Promise<void> {
 		const targets = item.blog ? [item.blog] : this.blogs;
 		for (const blog of targets) {
 			await this.doPull(blog);
@@ -46,7 +50,7 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 		const name = blog.rootFolder || blog.link;
 		const notice = new Notice(t(this.locale, 'pullConnecting', { name }), 0);
 
-		console.group(`[ramen pull] ${name}`);
+		debugLog(`[ramen pull] ${name}`);
 		try {
 			const { created, updated, skipped, log } = await pullBlog(
 				this.app,
@@ -64,12 +68,10 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 			const summary = t(this.locale, 'pullSummary', { created, updated, skipped });
 			debugLog(summary);
 			if (log.length > 0) debugLog('변경 파일:\n' + log.join('\n'));
-			console.groupEnd();
 
 			new Notice(`[${name}] ${summary}`, 6000);
 		} catch (e) {
 			console.error('Pull 실패:', e);
-			console.groupEnd();
 			notice.hide();
 			new Notice(t(this.locale, 'pullFailed', { name, e: String(e) }), 8000);
 		}

@@ -1,5 +1,5 @@
 import { App, MarkdownView, Modal, TFile, normalizePath, setIcon } from 'obsidian';
-import MyPlugin from './main';
+import RamenPlugin from './main';
 
 interface ImageItem {
 	file: TFile;
@@ -8,7 +8,7 @@ interface ImageItem {
 }
 
 class DeleteConfirmModal extends Modal {
-	constructor(app: App, private onConfirm: () => void) {
+	constructor(app: App, private onConfirm: () => void | Promise<void>) {
 		super(app);
 	}
 
@@ -25,7 +25,7 @@ class DeleteConfirmModal extends Modal {
 
 		const confirmBtn = btnRow.createEl('button', { text: 'Delete', cls: 'mod-warning' });
 		confirmBtn.addEventListener('click', () => {
-			this.onConfirm();
+			void this.onConfirm();
 			this.close();
 		});
 	}
@@ -38,7 +38,7 @@ class DeleteConfirmModal extends Modal {
 export class AttachmentPreviewManager {
 	private popup: HTMLElement | null = null;
 
-	constructor(private plugin: MyPlugin) {}
+	constructor(private plugin: RamenPlugin) {}
 
 	register() {
 		this.plugin.registerEvent(
@@ -79,7 +79,7 @@ export class AttachmentPreviewManager {
 	private showPopup(src: string, anchor: HTMLElement) {
 		const popup = this.getOrCreatePopup();
 		(popup.querySelector('img') as HTMLImageElement).src = src;
-		popup.style.display = 'block';
+		popup.addClass('is-visible');
 
 		const rect = anchor.getBoundingClientRect();
 		const popupH = 260;
@@ -91,7 +91,7 @@ export class AttachmentPreviewManager {
 	}
 
 	private hidePopup() {
-		if (this.popup) this.popup.style.display = 'none';
+		if (this.popup) this.popup.removeClass('is-visible');
 	}
 
 	private async deleteEmbed(noteFile: TFile, item: ImageItem) {

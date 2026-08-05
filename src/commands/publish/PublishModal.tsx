@@ -44,7 +44,11 @@ export class PublishModal extends FuzzySuggestModal<BlogOption> {
 		return item.label;
 	}
 
-	async onChooseItem(item: BlogOption): Promise<void> {
+	onChooseItem(item: BlogOption): void {
+		void this.handleChooseItem(item);
+	}
+
+	private async handleChooseItem(item: BlogOption): Promise<void> {
 		const targets = item.blog ? [item.blog] : this.blogs;
 		for (const blog of targets) {
 			await this.doToggle(blog);

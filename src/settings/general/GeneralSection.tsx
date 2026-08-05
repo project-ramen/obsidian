@@ -1,5 +1,5 @@
 import React from "react";
-import { SectionProps, MyPluginSettings } from "../types";
+import { SectionProps, RamenPluginSettings } from "../types";
 import { SettingRow } from "../components";
 import { t } from "../../i18n";
 
@@ -14,9 +14,9 @@ export function GeneralSection({ settings, save }: SectionProps) {
 					<select
 						value={settings.language}
 						onChange={(e) =>
-							save({
+							void save({
 								language: e.target
-									.value as MyPluginSettings["language"],
+									.value as RamenPluginSettings["language"],
 							})
 						}
 					>
@@ -32,7 +32,7 @@ export function GeneralSection({ settings, save }: SectionProps) {
 					<div
 						className={`checkbox-container${settings.showDotfiles ? " is-enabled" : ""}`}
 						onClick={() =>
-							save({ showDotfiles: !settings.showDotfiles })
+							void save({ showDotfiles: !settings.showDotfiles })
 						}
 					>
 						<input
@@ -50,7 +50,7 @@ export function GeneralSection({ settings, save }: SectionProps) {
 					<div
 						className={`checkbox-container${settings.dotfilesSync ? " is-enabled" : ""}`}
 						onClick={() =>
-							save({ dotfilesSync: !settings.dotfilesSync })
+							void save({ dotfilesSync: !settings.dotfilesSync })
 						}
 					>
 						<input
@@ -68,7 +68,7 @@ export function GeneralSection({ settings, save }: SectionProps) {
 					<div
 						className={`checkbox-container${settings.debugMode ? " is-enabled" : ""}`}
 						onClick={() =>
-							save({ debugMode: !settings.debugMode })
+							void save({ debugMode: !settings.debugMode })
 						}
 					>
 						<input

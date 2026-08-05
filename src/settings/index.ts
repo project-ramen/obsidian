@@ -2,16 +2,16 @@ import { App, PluginSettingTab } from 'obsidian';
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { SettingsPage } from './SettingsPage';
-import MyPlugin from '../main';
+import RamenPlugin from '../main';
 
-export type { BlogConfig, MyPluginSettings } from './types';
+export type { BlogConfig, RamenPluginSettings } from './types';
 export { DEFAULT_SETTINGS } from './types';
 
 export class RamenSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+	plugin: RamenPlugin;
 	private root: Root | null = null;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: RamenPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}

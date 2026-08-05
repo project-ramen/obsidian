@@ -1,5 +1,5 @@
 import { Editor, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl, setTooltip } from 'obsidian';
-import { BlogConfig, DEFAULT_SETTINGS, MyPluginSettings, RamenSettingTab } from './settings';
+import { BlogConfig, DEFAULT_SETTINGS, RamenPluginSettings, RamenSettingTab } from './settings';
 import { AttachmentPreviewManager } from './attachment-preview';
 import { CommentPreviewManager } from './comment-preview';
 import { InsertImageModal } from './commands/insert-image/InsertImageModal';
@@ -12,15 +12,15 @@ import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
 import { t } from './i18n';
 import { debugLog, setDebugMode } from './logger';
 
-export default class MyPlugin extends Plugin {
-	settings!: MyPluginSettings;
+export default class RamenPlugin extends Plugin {
+	settings!: RamenPluginSettings;
 	attachmentPreview!: AttachmentPreviewManager;
 	commentPreview!: CommentPreviewManager;
 
 	private _modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private _pullingPaths = new Set<string>();
-	private _attachmentFolderStyleEl: HTMLStyleElement | null = null;
-	private _publishedMarkerStyleEl: HTMLStyleElement | null = null;
+	private _attachmentFolderStyleSheet: CSSStyleSheet | null = null;
+	private _publishedMarkerStyleSheet: CSSStyleSheet | null = null;
 	private _publishedMarkerTimer: ReturnType<typeof setTimeout> | null = null;
 	/** path → 공개(published)된 블로그 label. 서버에서 검증된 파일만 포함 (hover 툴팁용) */
 	private _publishedByPath = new Map<string, string>();
@@ -152,7 +152,7 @@ export default class MyPlugin extends Plugin {
 		});
 
 		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
-			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]');
+			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]') as HTMLElement | null;
 			if (!target) return;
 			const path = target.getAttribute('data-path');
 			if (!path) return;
@@ -226,15 +226,32 @@ export default class MyPlugin extends Plugin {
 		this.commentPreview.unload();
 		for (const t of this._modifyTimers.values()) clearTimeout(t);
 		if (this._publishedMarkerTimer) clearTimeout(this._publishedMarkerTimer);
-		this._attachmentFolderStyleEl?.remove();
-		this._attachmentFolderStyleEl = null;
-		this._publishedMarkerStyleEl?.remove();
-		this._publishedMarkerStyleEl = null;
+		this.removeAdoptedStyleSheet(this._attachmentFolderStyleSheet);
+		this._attachmentFolderStyleSheet = null;
+		this.removeAdoptedStyleSheet(this._publishedMarkerStyleSheet);
+		this._publishedMarkerStyleSheet = null;
+	}
+
+	/**
+	 * Vault 콘텐츠(파일 경로 등)에 따라 동적으로 바뀌는 CSS 규칙을,
+	 * 정적 styles.css로 담을 수 없어 constructable stylesheet로 주입한다.
+	 * (`document.createElement('style')` 대신 `adoptedStyleSheets` 사용 — DOM에 새 엘리먼트를 붙이지 않는다.)
+	 */
+	private addAdoptedStyleSheet(css: string): CSSStyleSheet {
+		const sheet = new CSSStyleSheet();
+		sheet.replaceSync(css);
+		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+		return sheet;
+	}
+
+	private removeAdoptedStyleSheet(sheet: CSSStyleSheet | null) {
+		if (!sheet) return;
+		document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
 	}
 
 	applyAttachmentFolderHiding() {
-		this._attachmentFolderStyleEl?.remove();
-		this._attachmentFolderStyleEl = null;
+		this.removeAdoptedStyleSheet(this._attachmentFolderStyleSheet);
+		this._attachmentFolderStyleSheet = null;
 
 		if (!this.settings.hideAttachmentFolder) {
 			debugLog('[ramen] attachment folder hiding: 비활성화');
@@ -246,7 +263,8 @@ export default class MyPlugin extends Plugin {
 		// "." → 현재 파일과 같은 폴더
 		// "./name" → 현재 파일 기준 하위 폴더
 		// "path/to/folder" → vault 기준 절대 경로
-		const obsidianPath = (this.app.vault as unknown).getConfig('attachmentFolderPath') as string ?? '';
+		const vaultConfig = this.app.vault as unknown as { getConfig(key: string): unknown };
+		const obsidianPath = (vaultConfig.getConfig('attachmentFolderPath') as string | undefined) ?? '';
 
 		const blogRoots = this.settings.blogs
 			.map(b => b.rootFolder.replace(/\/+$/, ''))
@@ -301,14 +319,12 @@ export default class MyPlugin extends Plugin {
 			`.nav-folder:has(> div[data-path="${p}"]) { display: none !important; }`
 		);
 		debugLog('[ramen] attachment folder hiding: 주입할 CSS →\n' + rules.join('\n'));
-		this._attachmentFolderStyleEl = document.createElement('style');
-		this._attachmentFolderStyleEl.textContent = rules.join('\n');
-		document.head.appendChild(this._attachmentFolderStyleEl);
+		this._attachmentFolderStyleSheet = this.addAdoptedStyleSheet(rules.join('\n'));
 	}
 
 	applyPublishedFileMarkers() {
-		this._publishedMarkerStyleEl?.remove();
-		this._publishedMarkerStyleEl = null;
+		this.removeAdoptedStyleSheet(this._publishedMarkerStyleSheet);
+		this._publishedMarkerStyleSheet = null;
 
 		const rules: string[] = [];
 
@@ -330,7 +346,7 @@ export default class MyPlugin extends Plugin {
 					isPublished = this._publishedByPath.has(file.path);
 					isUploadedOnly = !isPublished && this._uploadedOnlyByPath.has(file.path);
 				} else {
-					const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+					const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as { published?: boolean | number } | undefined;
 					const pub = fm?.published;
 					if (pub !== undefined) {
 						debugLog(`[ramen] marker: ${file.path} published=${JSON.stringify(pub)} (${typeof pub})`);
@@ -354,9 +370,7 @@ export default class MyPlugin extends Plugin {
 		debugLog(`[ramen] marker: 생성된 rules ${rules.length}개`);
 		if (rules.length === 0) return;
 
-		this._publishedMarkerStyleEl = document.createElement('style');
-		this._publishedMarkerStyleEl.textContent = rules.join('\n');
-		document.head.appendChild(this._publishedMarkerStyleEl);
+		this._publishedMarkerStyleSheet = this.addAdoptedStyleSheet(rules.join('\n'));
 	}
 
 	/**
@@ -567,7 +581,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const saved = await this.loadData() as Partial<MyPluginSettings>;
+		const saved = await this.loadData() as Partial<RamenPluginSettings>;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
 		setDebugMode(this.settings.debugMode);
 		this.settings.blogs = this.settings.blogs.map(b => {
@@ -626,11 +640,11 @@ export default class MyPlugin extends Plugin {
 	private async syncPublishedFrontmatter(file: TFile): Promise<void> {
 		const connected = this.blogsForPath(file.path).filter(b => b.link && b.password && b.connectedAt);
 		const anyPublished = connected.some(b => this.isBlogPublishedForFile(file.path, b));
-		await this.app.fileManager.processFrontMatter(file, fm => {
+		await this.app.fileManager.processFrontMatter(file, (fm: { published?: boolean }) => {
 			if (anyPublished) {
-				fm['published'] = true;
+				fm.published = true;
 			} else {
-				delete fm['published'];
+				delete fm.published;
 			}
 		});
 	}

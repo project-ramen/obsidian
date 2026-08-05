@@ -5,5 +5,5 @@ export function setDebugMode(enabled: boolean): void {
 }
 
 export function debugLog(...args: unknown[]): void {
-	if (debugEnabled) console.log(...args);
+	if (debugEnabled) console.debug(...args);
 }

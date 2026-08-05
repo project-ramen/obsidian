@@ -1,5 +1,5 @@
 import React from "react";
-import { SectionProps, MyPluginSettings } from "../types";
+import { SectionProps, RamenPluginSettings } from "../types";
 import { SettingRow } from "../components";
 import { t } from "../../i18n";
 
@@ -14,9 +14,9 @@ export function AppearanceSection({ settings, save }: SectionProps) {
 					<select
 						value={settings.themeColor}
 						onChange={(e) =>
-							save({
+							void save({
 								themeColor: e.target
-									.value as MyPluginSettings["themeColor"],
+									.value as RamenPluginSettings["themeColor"],
 							})
 						}
 					>
@@ -35,9 +35,9 @@ export function AppearanceSection({ settings, save }: SectionProps) {
 					<select
 						value={settings.attachmentLocation}
 						onChange={(e) =>
-							save({
+							void save({
 								attachmentLocation: e.target
-									.value as MyPluginSettings["attachmentLocation"],
+									.value as RamenPluginSettings["attachmentLocation"],
 							})
 						}
 					>
@@ -57,7 +57,7 @@ export function AppearanceSection({ settings, save }: SectionProps) {
 					<div
 						className={`checkbox-container${settings.hideAttachmentFolder ? " is-enabled" : ""}`}
 						onClick={() =>
-							save({
+							void save({
 								hideAttachmentFolder:
 									!settings.hideAttachmentFolder,
 							})

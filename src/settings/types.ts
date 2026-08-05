@@ -9,7 +9,7 @@ export interface BlogConfig {
 	projectTag?: string;
 }
 
-export interface MyPluginSettings {
+export interface RamenPluginSettings {
 	blogs: BlogConfig[];
 	themeColor: 'system' | 'dark' | 'light';
 	attachmentLocation: 'bottom' | 'top';
@@ -20,7 +20,7 @@ export interface MyPluginSettings {
 	debugMode: boolean;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
+export const DEFAULT_SETTINGS: RamenPluginSettings = {
 	blogs: [],
 	themeColor: 'system',
 	attachmentLocation: 'bottom',
@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: MyPluginSettings = {
 };
 
 export interface SectionProps {
-	settings: MyPluginSettings;
-	save: (patch: Partial<MyPluginSettings>) => Promise<void>;
+	settings: RamenPluginSettings;
+	save: (patch: Partial<RamenPluginSettings>) => Promise<void>;
 	app: import('obsidian').App;
 }

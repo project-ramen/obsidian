@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { App, requestUrl } from "obsidian";
-import { BlogConfig, MyPluginSettings, SectionProps } from "../types";
+import { BlogConfig, SectionProps } from "../types";
 import { FolderInput, SettingRow } from "../components";
 import { normalizeBlogUrl, persistBlogConnection } from "./blog";
 import { Locale, t } from "../../i18n";
@@ -228,7 +228,7 @@ function BlogItem({
 									disabled={
 										savingTag || !blog.link || !blog.password
 									}
-									onClick={handleSaveProjectTag}
+									onClick={() => void handleSaveProjectTag()}
 								>
 									{savingTag
 										? t(locale, "settingsBlogSaving")
@@ -251,7 +251,7 @@ function BlogItem({
 						<button
 							className="mod-cta"
 							disabled={connecting || !blog.link}
-							onClick={handleConnect}
+							onClick={() => void handleConnect()}
 						>
 							{connecting
 								? t(locale, "settingsBlogConnecting")
@@ -288,12 +288,12 @@ export function BlogsSection({ settings, save, app }: SectionProps) {
 			attachmentFolder: "attachments",
 			projectTag: "",
 		};
-		save({ blogs: [...settings.blogs, newBlog] });
+		void save({ blogs: [...settings.blogs, newBlog] });
 		setExpandedId(id);
 	};
 
 	const updateBlog = (id: string, patch: Partial<Omit<BlogConfig, "id">>) => {
-		save({
+		void save({
 			blogs: settings.blogs.map((b) =>
 				b.id === id ? { ...b, ...patch } : b,
 			),
@@ -302,7 +302,7 @@ export function BlogsSection({ settings, save, app }: SectionProps) {
 
 	const deleteBlog = (id: string) => {
 		if (expandedId === id) setExpandedId(null);
-		save({ blogs: settings.blogs.filter((b) => b.id !== id) });
+		void save({ blogs: settings.blogs.filter((b) => b.id !== id) });
 	};
 
 	return (

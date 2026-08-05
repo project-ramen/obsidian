@@ -1,5 +1,5 @@
 import { App, Modal, Notice, requestUrl, setIcon } from 'obsidian';
-import MyPlugin from '../../main';
+import RamenPlugin from '../../main';
 import { slugFromPath } from '../../sync';
 import { normalizeBlogUrl } from '../../settings/blogs/blog';
 import { BlogConfig } from '../../settings/types';
@@ -23,7 +23,7 @@ interface BlogCommentsResult {
 }
 
 export class AllCommentsModal extends Modal {
-	constructor(app: App, private plugin: MyPlugin) {
+	constructor(app: App, private plugin: RamenPlugin) {
 		super(app);
 	}
 
