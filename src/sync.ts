@@ -350,6 +350,20 @@ function docToFileContent(doc: PostDoc): string {
 	return lines.join('\n');
 }
 
+// slug → 로컬 TFile 매핑. slugFromPath는 "." → "-" 변환 등으로 원본 파일명을 그대로 복원 못 하므로,
+// "root/{slug}.md" 경로를 그대로 재구성해서 존재 여부를 확인하면 파일명에 "."이 있는 경우
+// (예: "01.테스트.md" → slug "01-테스트") 항상 "없는 파일"로 오판해 pull마다 중복 생성됨.
+// 로컬 파일들의 실제 slug를 미리 계산해 매칭해야 원본 파일을 찾을 수 있다.
+function buildLocalSlugMap(app: App, rootFolder: string): Map<string, TFile> {
+	const root = rootFolder.replace(/\/+$/, '');
+	const map = new Map<string, TFile>();
+	for (const file of app.vault.getMarkdownFiles()) {
+		if (!file.path.startsWith(root + '/')) continue;
+		map.set(slugFromPath(file.path, rootFolder), file);
+	}
+	return map;
+}
+
 // Pull된 문서를 vault 파일에 반영 (서버가 더 새로울 때만, 기존 파일만)
 // frontmatter(title/tags/published/created_at)까지 함께 써서 로컬 상태를 서버와 통일시킨다.
 // body_md만 반영하면 published 등 frontmatter가 통째로 사라지는 문제가 있었음.
@@ -359,12 +373,12 @@ async function applyPulledDocs(
 	docs: PostDoc[],
 	onApply: (path: string) => void,
 ): Promise<void> {
+	const localBySlug = buildLocalSlugMap(app, blog.rootFolder);
 	for (const doc of docs) {
 		if (doc.deleted_at) continue;
-		const root = blog.rootFolder.replace(/\/+$/, '');
-		const filePath = normalizePath(`${root}/${doc.slug}.md`);
-		const file = app.vault.getAbstractFileByPath(filePath);
-		if (!(file instanceof TFile)) continue;
+		const file = localBySlug.get(doc.slug);
+		if (!file) continue;
+		const filePath = file.path;
 
 		if (lastLivePushedAt.get(`${blog.id}:${filePath}`) === doc.updated_at) continue;
 
@@ -404,6 +418,7 @@ export async function pullBlog(
 	let updated = 0;
 	let skipped = 0;
 	const log: string[] = [];
+	const localBySlug = buildLocalSlugMap(app, blog.rootFolder);
 
 	for (const doc of result.documents) {
 		if (doc.deleted_at) {
@@ -411,8 +426,8 @@ export async function pullBlog(
 			continue;
 		}
 		const root = blog.rootFolder.replace(/\/+$/, '');
-		const filePath = normalizePath(`${root}/${doc.slug}.md`);
-		const existing = app.vault.getAbstractFileByPath(filePath);
+		const existing = localBySlug.get(doc.slug);
+		const filePath = existing ? existing.path : normalizePath(`${root}/${doc.slug}.md`);
 
 		console.debug(`[ramen pull] 처리 중: ${doc.slug}`, {
 			id: doc.id,
@@ -424,7 +439,7 @@ export async function pullBlog(
 			body_preview: doc.body_md?.slice(0, 80),
 		});
 
-		if (existing instanceof TFile) {
+		if (existing) {
 			const isOwnEcho = lastLivePushedAt.get(`${blog.id}:${existing.path}`) === doc.updated_at;
 			const serverMtime = new Date(doc.updated_at).getTime();
 			if (!isOwnEcho && serverMtime > existing.stat.mtime) {
@@ -447,7 +462,8 @@ export async function pullBlog(
 				await app.vault.createFolder(dir);
 			}
 			onApply(filePath);
-			await app.vault.create(filePath, docToFileContent(doc));
+			const newFile = await app.vault.create(filePath, docToFileContent(doc));
+			localBySlug.set(doc.slug, newFile);
 			created++;
 			const entry = t(locale, 'pullCreated', { slug: doc.slug });
 			log.push(entry);
