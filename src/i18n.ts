@@ -55,7 +55,7 @@ const ko = {
 	pullUpdated: '[업데이트] {slug}',
 	pullSkipped: '[스킵] {slug} (로컬이 최신)',
 	pullCreated: '[생성] {slug}',
-	pullDeleted: '[삭제] {slug} (삭제/ 폴더로 이동)',
+	pullDeleted: '[삭제] {slug} (.trashbin/ 폴더로 이동)',
 	pullSummary: '완료 — +{created} 생성 / ~{updated} 업데이트 / -{deleted} 삭제 / {skipped} 스킵',
 	pullFailed: '[{name}] Pull 실패: {e}',
 
@@ -210,7 +210,7 @@ const en: Record<TranslationKey, string> = {
 	pullUpdated: '[updated] {slug}',
 	pullSkipped: '[skipped] {slug} (local is newer)',
 	pullCreated: '[created] {slug}',
-	pullDeleted: '[deleted] {slug} (moved to 삭제/ folder)',
+	pullDeleted: '[deleted] {slug} (moved to .trashbin/ folder)',
 	pullSummary: 'Done — +{created} created / ~{updated} updated / -{deleted} deleted / {skipped} skipped',
 	pullFailed: '[{name}] Pull failed: {e}',
 

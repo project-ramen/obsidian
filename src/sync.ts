@@ -197,6 +197,18 @@ export function slugFromPath(filePath: string, rootFolder: string): string {
 	return rel.replace(/\.md$/, '').replace(/\./g, '-').replace(/-{2,}/g, '-');
 }
 
+/** pull에서 삭제/이름변경으로 확인된 파일이 보관되는 폴더 이름. "."로 시작해 파일 탐색기 dotfile 설정을 따라 기본적으로 숨겨짐. */
+export const TRASHBIN_DIR_NAME = '.trashbin';
+
+export function trashbinRootPath(rootFolder: string): string {
+	return `${rootFolder.replace(/\/+$/, '')}/${TRASHBIN_DIR_NAME}`;
+}
+
+/** 이 경로가 rootFolder 안의 trashbin 하위(보관된 파일)인지. push 스캔·수정 이벤트에서 제외하는 데 씀. */
+export function isInTrashbin(filePath: string, rootFolder: string): boolean {
+	return filePath.startsWith(`${trashbinRootPath(rootFolder)}/`);
+}
+
 function categoryFromPath(filePath: string, rootFolder: string): string[] {
 	const root = rootFolder.replace(/\/+$/, '');
 	const rel = filePath.startsWith(root + '/')
@@ -359,6 +371,7 @@ function buildLocalSlugMap(app: App, rootFolder: string): Map<string, TFile> {
 	const map = new Map<string, TFile>();
 	for (const file of app.vault.getMarkdownFiles()) {
 		if (!file.path.startsWith(root + '/')) continue;
+		if (isInTrashbin(file.path, rootFolder)) continue;
 		map.set(slugFromPath(file.path, rootFolder), file);
 	}
 	return map;
@@ -379,16 +392,15 @@ async function trashEmptyFoldersUpward(app: App, startFolderPath: string, rootFo
 	}
 }
 
-// 서버에서 삭제된 것으로 확인된 로컬 파일을 지우는 대신 "삭제/{블로그 폴더명}/{연도}/{월-일}/"
-// 아래로 옮겨 보관한다. rootFolder 밖으로 옮기므로 이후 push 스캔 대상에서도 자연히 빠진다.
+// 서버에서 삭제된 것으로 확인된 로컬 파일을 지우는 대신 rootFolder 안 ".trashbin/{연도}/{월-일}/"
+// 아래로 옮겨 보관한다. isInTrashbin으로 push 스캔·수정 이벤트에서 제외되므로 다시 서버로 안 올라간다.
+// 재발행처럼 보이지 않도록 published frontmatter도 꺼둔다.
 async function archiveDeletedFile(app: App, file: TFile, blog: BlogConfig): Promise<string> {
-	const root = blog.rootFolder.replace(/\/+$/, '');
-	const baseName = root.split('/').pop() || root;
 	const now = new Date();
 	const year = String(now.getFullYear());
 	const month = String(now.getMonth() + 1).padStart(2, '0');
 	const day = String(now.getDate()).padStart(2, '0');
-	const dir = normalizePath(`삭제/${baseName}/${year}/${month}-${day}`);
+	const dir = normalizePath(`${trashbinRootPath(blog.rootFolder)}/${year}/${month}-${day}`);
 	if (!app.vault.getAbstractFileByPath(dir)) {
 		await app.vault.createFolder(dir);
 	}
@@ -403,6 +415,9 @@ async function archiveDeletedFile(app: App, file: TFile, blog: BlogConfig): Prom
 	}
 
 	await app.fileManager.renameFile(file, targetPath);
+	await app.fileManager.processFrontMatter(file, (fm: { published?: boolean }) => {
+		fm.published = false;
+	});
 	return targetPath;
 }
 
@@ -546,7 +561,7 @@ export async function syncBlog(
 	const root = blog.rootFolder.replace(/\/+$/, '');
 
 	const allFiles = app.vault.getMarkdownFiles()
-		.filter(f => f.path.startsWith(root + '/'));
+		.filter(f => f.path.startsWith(root + '/') && !isInTrashbin(f.path, blog.rootFolder));
 
 	const filesToPush = checkpoint
 		? allFiles.filter(f => f.stat.mtime > new Date(checkpoint).getTime())

@@ -4,7 +4,7 @@ import { AttachmentPreviewManager } from './attachment-preview';
 import { CommentPreviewManager } from './comment-preview';
 import { InsertImageModal } from './commands/insert-image/InsertImageModal';
 import { AllCommentsModal } from './commands/all-comments/AllCommentsModal';
-import { deletedPostDoc, fileToPostDoc, publishToBlog, pushFileLive, slugFromPath, syncBlog } from './sync';
+import { deletedPostDoc, fileToPostDoc, isInTrashbin, publishToBlog, pushFileLive, slugFromPath, syncBlog } from './sync';
 import { PullModal } from './commands/pull/PullModal';
 import { PublishModal } from './commands/publish/PublishModal';
 import { ReconnectModal } from './commands/reconnect/ReconnectModal';
@@ -455,7 +455,10 @@ export default class RamenPlugin extends Plugin {
 	private blogsForPath(filePath: string) {
 		return this.settings.blogs.filter(b => {
 			const root = b.rootFolder.replace(/\/+$/, '');
-			return root && filePath.startsWith(root + '/');
+			if (!root || !filePath.startsWith(root + '/')) return false;
+			// .trashbin 안 파일은 pull이 보관해둔 것 — 다시 push되면 삭제가 무효화되므로 제외
+			if (isInTrashbin(filePath, b.rootFolder)) return false;
+			return true;
 		});
 	}
 
