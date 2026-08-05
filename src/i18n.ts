@@ -55,7 +55,8 @@ const ko = {
 	pullUpdated: '[업데이트] {slug}',
 	pullSkipped: '[스킵] {slug} (로컬이 최신)',
 	pullCreated: '[생성] {slug}',
-	pullSummary: '완료 — +{created} 생성 / ~{updated} 업데이트 / {skipped} 스킵',
+	pullDeleted: '[삭제] {slug} (삭제/ 폴더로 이동)',
+	pullSummary: '완료 — +{created} 생성 / ~{updated} 업데이트 / -{deleted} 삭제 / {skipped} 스킵',
 	pullFailed: '[{name}] Pull 실패: {e}',
 
 	reconnectModalPlaceholder: '재연결할 블로그 선택…',
@@ -209,7 +210,8 @@ const en: Record<TranslationKey, string> = {
 	pullUpdated: '[updated] {slug}',
 	pullSkipped: '[skipped] {slug} (local is newer)',
 	pullCreated: '[created] {slug}',
-	pullSummary: 'Done — +{created} created / ~{updated} updated / {skipped} skipped',
+	pullDeleted: '[deleted] {slug} (moved to 삭제/ folder)',
+	pullSummary: 'Done — +{created} created / ~{updated} updated / -{deleted} deleted / {skipped} skipped',
 	pullFailed: '[{name}] Pull failed: {e}',
 
 	reconnectModalPlaceholder: 'Select a blog to reconnect…',

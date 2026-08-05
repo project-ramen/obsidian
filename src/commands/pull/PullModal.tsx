@@ -52,7 +52,7 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 
 		debugLog(`[ramen pull] ${name}`);
 		try {
-			const { created, updated, skipped, log } = await pullBlog(
+			const { created, updated, skipped, deleted, log } = await pullBlog(
 				this.app,
 				blog,
 				this.onApply,
@@ -65,7 +65,7 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 
 			notice.hide();
 
-			const summary = t(this.locale, 'pullSummary', { created, updated, skipped });
+			const summary = t(this.locale, 'pullSummary', { created, updated, skipped, deleted });
 			debugLog(summary);
 			if (log.length > 0) debugLog('변경 파일:\n' + log.join('\n'));
 

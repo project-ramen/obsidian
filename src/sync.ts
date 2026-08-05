@@ -1,4 +1,4 @@
-import { App, Notice, TFile, normalizePath, requestUrl } from 'obsidian';
+import { App, Notice, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { BlogConfig } from './settings/types';
 import { Locale, t } from './i18n';
 import { debugLog } from './logger';
@@ -364,6 +364,48 @@ function buildLocalSlugMap(app: App, rootFolder: string): Map<string, TFile> {
 	return map;
 }
 
+// 파일 이동 후 빈 폴더가 남으면 rootFolder까지(포함 안 함) 위로 올라가며 정리.
+// 폴더 이름 변경(=구 slug는 deleted, 새 slug는 새 파일로 pull)의 부산물로 남는 빈 폴더를 없애기 위함.
+async function trashEmptyFoldersUpward(app: App, startFolderPath: string, rootFolder: string): Promise<void> {
+	const root = rootFolder.replace(/\/+$/, '');
+	let folderPath = startFolderPath;
+	while (folderPath && folderPath !== root && (folderPath === root || folderPath.startsWith(root + '/'))) {
+		const folder = app.vault.getAbstractFileByPath(folderPath);
+		if (!(folder instanceof TFolder) || folder.children.length > 0) break;
+		const parentPath = folder.parent?.path ?? '';
+		await app.fileManager.trashFile(folder);
+		debugLog(`[ramen pull] 빈 폴더 정리: ${folderPath}`);
+		folderPath = parentPath;
+	}
+}
+
+// 서버에서 삭제된 것으로 확인된 로컬 파일을 지우는 대신 "삭제/{블로그 폴더명}/{연도}/{월-일}/"
+// 아래로 옮겨 보관한다. rootFolder 밖으로 옮기므로 이후 push 스캔 대상에서도 자연히 빠진다.
+async function archiveDeletedFile(app: App, file: TFile, blog: BlogConfig): Promise<string> {
+	const root = blog.rootFolder.replace(/\/+$/, '');
+	const baseName = root.split('/').pop() || root;
+	const now = new Date();
+	const year = String(now.getFullYear());
+	const month = String(now.getMonth() + 1).padStart(2, '0');
+	const day = String(now.getDate()).padStart(2, '0');
+	const dir = normalizePath(`삭제/${baseName}/${year}/${month}-${day}`);
+	if (!app.vault.getAbstractFileByPath(dir)) {
+		await app.vault.createFolder(dir);
+	}
+
+	let targetPath = normalizePath(`${dir}/${file.name}`);
+	if (app.vault.getAbstractFileByPath(targetPath)) {
+		let i = 2;
+		while (app.vault.getAbstractFileByPath(targetPath)) {
+			targetPath = normalizePath(`${dir}/${file.basename} ${i}.${file.extension}`);
+			i++;
+		}
+	}
+
+	await app.fileManager.renameFile(file, targetPath);
+	return targetPath;
+}
+
 // Pull된 문서를 vault 파일에 반영 (서버가 더 새로울 때만, 기존 파일만)
 // frontmatter(title/tags/published/created_at)까지 함께 써서 로컬 상태를 서버와 통일시킨다.
 // body_md만 반영하면 published 등 frontmatter가 통째로 사라지는 문제가 있었음.
@@ -394,6 +436,7 @@ export interface PullResult {
 	created: number;
 	updated: number;
 	skipped: number;
+	deleted: number;
 	log: string[];
 }
 
@@ -417,12 +460,26 @@ export async function pullBlog(
 	let created = 0;
 	let updated = 0;
 	let skipped = 0;
+	let deleted = 0;
 	const log: string[] = [];
 	const localBySlug = buildLocalSlugMap(app, blog.rootFolder);
 
 	for (const doc of result.documents) {
 		if (doc.deleted_at) {
-			console.debug(`[ramen pull] 스킵(deleted): ${doc.slug}`, doc);
+			const existingForDelete = localBySlug.get(doc.slug);
+			if (existingForDelete) {
+				const parentPath = existingForDelete.parent?.path ?? '';
+				const archivedPath = await archiveDeletedFile(app, existingForDelete, blog);
+				localBySlug.delete(doc.slug);
+				await trashEmptyFoldersUpward(app, parentPath, blog.rootFolder);
+				deleted++;
+				const entry = t(locale, 'pullDeleted', { slug: doc.slug });
+				log.push(entry);
+				onProgress?.(entry);
+				debugLog(`[ramen pull] ${entry} → ${archivedPath}`);
+			} else {
+				console.debug(`[ramen pull] 스킵(deleted, 로컬에 없음): ${doc.slug}`, doc);
+			}
 			continue;
 		}
 		const root = blog.rootFolder.replace(/\/+$/, '');
@@ -473,7 +530,7 @@ export async function pullBlog(
 	}
 
 	localStorage.setItem(checkpointKey(blog.id), result.checkpoint);
-	return { created, updated, skipped, log };
+	return { created, updated, skipped, deleted, log };
 }
 
 export async function syncBlog(
