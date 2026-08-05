@@ -18,7 +18,7 @@ class DeleteConfirmModal extends Modal {
 			text: 'This will remove the embed from the file. The image file itself will not be deleted.',
 		});
 
-		const btnRow = this.contentEl.createEl('div', { cls: 'modal-button-container' });
+		const btnRow = this.contentEl.createDiv({ cls: 'modal-button-container' });
 
 		const cancelBtn = btnRow.createEl('button', { text: 'Cancel' });
 		cancelBtn.addEventListener('click', () => this.close());
@@ -43,7 +43,7 @@ export class AttachmentPreviewManager {
 	register() {
 		this.plugin.registerEvent(
 			this.plugin.app.workspace.on('file-open', (file) => {
-				if (file) setTimeout(() => this.renderStrip(file), 100);
+				if (file) window.setTimeout(() => this.renderStrip(file), 100);
 			})
 		);
 
@@ -52,14 +52,14 @@ export class AttachmentPreviewManager {
 			this.plugin.app.metadataCache.on('changed', (file) => {
 				const activeFile = this.plugin.app.workspace.getActiveFile();
 				if (activeFile && file.path === activeFile.path) {
-					setTimeout(() => this.renderStrip(file), 100);
+					window.setTimeout(() => this.renderStrip(file), 100);
 				}
 			})
 		);
 
 		this.plugin.app.workspace.onLayoutReady(() => {
 			const file = this.plugin.app.workspace.getActiveFile();
-			if (file) setTimeout(() => this.renderStrip(file), 100);
+			if (file) window.setTimeout(() => this.renderStrip(file), 100);
 		});
 	}
 
@@ -70,7 +70,7 @@ export class AttachmentPreviewManager {
 
 	private getOrCreatePopup(): HTMLElement {
 		if (!this.popup) {
-			this.popup = document.body.createEl('div', { cls: 'ramen-image-popup' });
+			this.popup = document.body.createDiv({ cls: 'ramen-image-popup' });
 			this.popup.createEl('img');
 		}
 		return this.popup;
@@ -154,11 +154,11 @@ export class AttachmentPreviewManager {
 		const anchor = view.containerEl.querySelector('.cm-contentContainer');
 		if (!anchor) return;
 
-		const strip = createEl('div', { cls: `ramen-attachment-strip location-${attachmentLocation}` });
-		strip.createEl('span', { cls: 'ramen-strip-label', text: 'Attachments' });
+		const strip = createDiv({ cls: `ramen-attachment-strip location-${attachmentLocation}` });
+		strip.createSpan({ cls: 'ramen-strip-label', text: 'Attachments' });
 
 		for (const item of imageItems) {
-			const wrapper = strip.createEl('div', { cls: 'ramen-strip-item' });
+			const wrapper = strip.createDiv({ cls: 'ramen-strip-item' });
 
 			const img = wrapper.createEl('img');
 			img.src = this.plugin.app.vault.getResourcePath(item.file);
@@ -180,7 +180,7 @@ export class AttachmentPreviewManager {
 				this.hidePopup();
 				new DeleteConfirmModal(this.plugin.app, async () => {
 					await this.deleteEmbed(noteFile, item);
-					setTimeout(() => this.renderStrip(noteFile), 100);
+					window.setTimeout(() => this.renderStrip(noteFile), 100);
 				}).open();
 			});
 		}

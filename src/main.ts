@@ -110,10 +110,10 @@ export default class RamenPlugin extends Plugin {
 				if (this._pullingPaths.has(file.path)) return;
 
 				const existing = this._modifyTimers.get(file.path);
-				if (existing) clearTimeout(existing);
+				if (existing) window.clearTimeout(existing);
 				this._modifyTimers.set(
 					file.path,
-					setTimeout(() => {
+					window.setTimeout(() => {
 						this._modifyTimers.delete(file.path);
 						void this.syncModifiedFile(file);
 					}, 500),
@@ -152,7 +152,7 @@ export default class RamenPlugin extends Plugin {
 		});
 
 		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
-			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]') as HTMLElement | null;
+			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]');
 			if (!target) return;
 			const path = target.getAttribute('data-path');
 			if (!path) return;
@@ -167,8 +167,8 @@ export default class RamenPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.metadataCache.on('changed', () => {
-				if (this._publishedMarkerTimer) clearTimeout(this._publishedMarkerTimer);
-				this._publishedMarkerTimer = setTimeout(() => {
+				if (this._publishedMarkerTimer) window.clearTimeout(this._publishedMarkerTimer);
+				this._publishedMarkerTimer = window.setTimeout(() => {
 					this._publishedMarkerTimer = null;
 					this.applyPublishedFileMarkers();
 				}, 1000);
@@ -224,8 +224,8 @@ export default class RamenPlugin extends Plugin {
 	onunload() {
 		this.attachmentPreview.unload();
 		this.commentPreview.unload();
-		for (const t of this._modifyTimers.values()) clearTimeout(t);
-		if (this._publishedMarkerTimer) clearTimeout(this._publishedMarkerTimer);
+		for (const t of this._modifyTimers.values()) window.clearTimeout(t);
+		if (this._publishedMarkerTimer) window.clearTimeout(this._publishedMarkerTimer);
 		this.removeAdoptedStyleSheet(this._attachmentFolderStyleSheet);
 		this._attachmentFolderStyleSheet = null;
 		this.removeAdoptedStyleSheet(this._publishedMarkerStyleSheet);

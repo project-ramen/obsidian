@@ -34,12 +34,12 @@ export class DeleteCommentModal extends Modal {
 			if (e.key === 'Enter') void this.submit();
 		});
 
-		const btnRow = this.contentEl.createEl('div', { cls: 'modal-button-container' });
+		const btnRow = this.contentEl.createDiv({ cls: 'modal-button-container' });
 		btnRow.createEl('button', { text: t(this.locale, 'cancel') }).addEventListener('click', () => this.close());
 		const confirmBtn = btnRow.createEl('button', { text: t(this.locale, 'delete'), cls: 'mod-warning' });
 		confirmBtn.addEventListener('click', () => void this.submit());
 
-		setTimeout(() => this.passwordInput.focus(), 50);
+		window.setTimeout(() => this.passwordInput.focus(), 50);
 	}
 
 	private async submit() {
@@ -74,8 +74,8 @@ export class CommentPreviewManager {
 	}
 
 	private scheduleRender(file: TFile) {
-		if (this.renderTimer) clearTimeout(this.renderTimer);
-		this.renderTimer = setTimeout(() => {
+		if (this.renderTimer) window.clearTimeout(this.renderTimer);
+		this.renderTimer = window.setTimeout(() => {
 			this.renderTimer = null;
 			void this.renderStrip(file);
 		}, 400);
@@ -126,12 +126,12 @@ export class CommentPreviewManager {
 		const anchor = view.containerEl.querySelector('.cm-contentContainer');
 		if (!anchor) return;
 
-		const strip = createEl('div', { cls: 'ramen-comment-strip' });
+		const strip = createDiv({ cls: 'ramen-comment-strip' });
 
 		const locale = this.plugin.settings.language;
 		const totalCount = results.reduce((sum, r) => sum + r.comments.length, 0);
-		const header = strip.createEl('div', { cls: 'ramen-comment-header' });
-		header.createEl('span', { cls: 'ramen-strip-label', text: t(locale, 'commentsCountLabel', { count: totalCount }) });
+		const header = strip.createDiv({ cls: 'ramen-comment-header' });
+		header.createSpan({ cls: 'ramen-strip-label', text: t(locale, 'commentsCountLabel', { count: totalCount }) });
 
 		const refreshBtn = header.createEl('button', { cls: 'ramen-comment-refresh-btn' });
 		setIcon(refreshBtn, 'refresh-cw');
@@ -140,20 +140,20 @@ export class CommentPreviewManager {
 
 		const showBlogLabels = blogs.length > 1;
 		for (const { blog, comments } of results) {
-			const section = strip.createEl('div', { cls: 'ramen-comment-blog-section' });
+			const section = strip.createDiv({ cls: 'ramen-comment-blog-section' });
 
 			if (showBlogLabels) {
-				const sectionHeader = section.createEl('div', { cls: 'ramen-comment-blog-header' });
-				sectionHeader.createEl('span', {
+				const sectionHeader = section.createDiv({ cls: 'ramen-comment-blog-header' });
+				sectionHeader.createSpan({
 					cls: 'ramen-comment-blog-name',
 					text: blog.link.replace(/^https?:\/\//, ''),
 				});
-				sectionHeader.createEl('span', { cls: 'ramen-comment-blog-count', text: t(locale, 'countSuffix', { count: comments.length }) });
+				sectionHeader.createSpan({ cls: 'ramen-comment-blog-count', text: t(locale, 'countSuffix', { count: comments.length }) });
 			}
 
-			const list = section.createEl('div', { cls: 'ramen-comment-list' });
+			const list = section.createDiv({ cls: 'ramen-comment-list' });
 			if (comments.length === 0) {
-				list.createEl('div', { cls: 'ramen-comment-empty', text: t(locale, 'noCommentsYet') });
+				list.createDiv({ cls: 'ramen-comment-empty', text: t(locale, 'noCommentsYet') });
 			} else {
 				for (const comment of comments) {
 					this.renderCommentItem(list, comment, blog, noteFile);
@@ -171,11 +171,11 @@ export class CommentPreviewManager {
 		noteFile: TFile,
 	) {
 		const locale = this.plugin.settings.language;
-		const item = container.createEl('div', { cls: 'ramen-comment-item' });
+		const item = container.createDiv({ cls: 'ramen-comment-item' });
 
-		const meta = item.createEl('div', { cls: 'ramen-comment-meta' });
-		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || t(locale, 'anonymous') });
-		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at, locale) });
+		const meta = item.createDiv({ cls: 'ramen-comment-meta' });
+		meta.createSpan({ cls: 'ramen-comment-user', text: comment.user_id || t(locale, 'anonymous') });
+		meta.createSpan({ cls: 'ramen-comment-date', text: formatDate(comment.created_at, locale) });
 
 		const deleteBtn = meta.createEl('button', { cls: 'ramen-comment-delete-btn' });
 		setIcon(deleteBtn, 'trash-2');
@@ -186,7 +186,7 @@ export class CommentPreviewManager {
 			}, locale).open();
 		});
 
-		item.createEl('div', { cls: 'ramen-comment-content', text: comment.content });
+		item.createDiv({ cls: 'ramen-comment-content', text: comment.content });
 	}
 
 	private async deleteComment(
@@ -222,7 +222,7 @@ export class CommentPreviewManager {
 	unload() {
 		this.clearStrip();
 		if (this.renderTimer) {
-			clearTimeout(this.renderTimer);
+			window.clearTimeout(this.renderTimer);
 			this.renderTimer = null;
 		}
 	}

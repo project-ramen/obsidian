@@ -81,14 +81,14 @@ export class AllCommentsModal extends Modal {
 
 	private renderBlogSection(container: HTMLElement, { blog, comments, error }: BlogCommentsResult) {
 		const locale = this.plugin.settings.language;
-		const section = container.createEl('div', { cls: 'ramen-all-comments-section' });
+		const section = container.createDiv({ cls: 'ramen-all-comments-section' });
 
-		const header = section.createEl('div', { cls: 'ramen-all-comments-blog-header' });
-		header.createEl('span', {
+		const header = section.createDiv({ cls: 'ramen-all-comments-blog-header' });
+		header.createSpan({
 			cls: 'ramen-all-comments-blog-name',
 			text: blog.rootFolder || blog.link,
 		});
-		header.createEl('span', {
+		header.createSpan({
 			cls: 'ramen-all-comments-blog-count',
 			text: error ? error : t(locale, 'countSuffix', { count: comments.length }),
 		});
@@ -96,11 +96,11 @@ export class AllCommentsModal extends Modal {
 		if (error) return;
 
 		if (comments.length === 0) {
-			section.createEl('div', { cls: 'ramen-comment-empty', text: t(locale, 'noComments') });
+			section.createDiv({ cls: 'ramen-comment-empty', text: t(locale, 'noComments') });
 			return;
 		}
 
-		const list = section.createEl('div', { cls: 'ramen-comment-list' });
+		const list = section.createDiv({ cls: 'ramen-comment-list' });
 		for (const comment of comments) {
 			this.renderCommentItem(list, comment, blog);
 		}
@@ -108,18 +108,18 @@ export class AllCommentsModal extends Modal {
 
 	private renderCommentItem(container: HTMLElement, comment: AllCommentItem, blog: BlogConfig) {
 		const locale = this.plugin.settings.language;
-		const item = container.createEl('div', { cls: 'ramen-comment-item' });
+		const item = container.createDiv({ cls: 'ramen-comment-item' });
 
-		const postRow = item.createEl('div', { cls: 'ramen-all-comments-post-row' });
-		const postTitle = postRow.createEl('span', {
+		const postRow = item.createDiv({ cls: 'ramen-all-comments-post-row' });
+		const postTitle = postRow.createSpan({
 			cls: 'ramen-all-comments-post-title',
 			text: comment.post_title || comment.post_slug,
 		});
 		postTitle.addEventListener('click', () => void this.openPost(blog, comment.post_slug));
 
-		const meta = item.createEl('div', { cls: 'ramen-comment-meta' });
-		meta.createEl('span', { cls: 'ramen-comment-user', text: comment.user_id || t(locale, 'anonymous') });
-		meta.createEl('span', { cls: 'ramen-comment-date', text: formatDate(comment.created_at, locale) });
+		const meta = item.createDiv({ cls: 'ramen-comment-meta' });
+		meta.createSpan({ cls: 'ramen-comment-user', text: comment.user_id || t(locale, 'anonymous') });
+		meta.createSpan({ cls: 'ramen-comment-date', text: formatDate(comment.created_at, locale) });
 
 		const deleteBtn = meta.createEl('button', { cls: 'ramen-comment-delete-btn' });
 		setIcon(deleteBtn, 'trash-2');
@@ -130,7 +130,7 @@ export class AllCommentsModal extends Modal {
 			}, locale).open();
 		});
 
-		item.createEl('div', { cls: 'ramen-comment-content', text: comment.content });
+		item.createDiv({ cls: 'ramen-comment-content', text: comment.content });
 	}
 
 	private async openPost(blog: BlogConfig, slug: string) {

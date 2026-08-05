@@ -79,7 +79,7 @@ export function FolderInput({
 	};
 
 	const handleBlur = () => {
-		setTimeout(() => setOpen(false), 150);
+		window.setTimeout(() => setOpen(false), 150);
 		onSave(value);
 	};
 
