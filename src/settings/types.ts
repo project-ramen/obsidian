@@ -18,6 +18,12 @@ export interface RamenPluginSettings {
 	hideAttachmentFolder: boolean;
 	language: 'ko' | 'en';
 	debugMode: boolean;
+	/** 시작 시 GitHub 릴리즈를 자동으로 확인할지 여부 (12시간에 한 번) */
+	autoUpdateCheck: boolean;
+	/** 마지막으로 업데이트를 확인한 시각 (ms epoch) */
+	lastUpdateCheckAt: number;
+	/** 마지막 확인에서 알아낸 최신 버전 (설정 UI 표시용 캐시) */
+	latestKnownVersion?: string;
 }
 
 export const DEFAULT_SETTINGS: RamenPluginSettings = {
@@ -29,6 +35,8 @@ export const DEFAULT_SETTINGS: RamenPluginSettings = {
 	hideAttachmentFolder: false,
 	language: 'ko',
 	debugMode: false,
+	autoUpdateCheck: true,
+	lastUpdateCheckAt: 0,
 };
 
 export interface SectionProps {

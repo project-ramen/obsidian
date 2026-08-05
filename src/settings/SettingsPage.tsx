@@ -90,6 +90,7 @@ export function SettingsPage({ plugin }: { plugin: RamenPlugin }) {
 						settings={settings}
 						save={save}
 						app={plugin.app}
+						plugin={plugin}
 					/>
 				)}
 			</div>

@@ -1,9 +1,66 @@
-import React from "react";
+import React, { useState } from "react";
 import { SectionProps, RamenPluginSettings } from "../types";
 import { SettingRow } from "../components";
-import { t } from "../../i18n";
+import { t, Locale } from "../../i18n";
+import RamenPlugin from "../../main";
+import { isNewerVersion } from "../../update-checker";
 
-export function GeneralSection({ settings, save }: SectionProps) {
+function UpdateRow({ plugin, locale }: { plugin: RamenPlugin; locale: Locale }) {
+	const current = plugin.manifest.version;
+	const [checking, setChecking] = useState(false);
+	const [installing, setInstalling] = useState(false);
+	const [latest, setLatest] = useState<string | null>(plugin.settings.latestKnownVersion ?? null);
+
+	const hasUpdate = !!latest && isNewerVersion(latest, current);
+
+	const handleCheck = async () => {
+		setChecking(true);
+		try {
+			const result = await plugin.checkForUpdates({ force: true });
+			setLatest(result.latestVersion);
+		} finally {
+			setChecking(false);
+		}
+	};
+
+	const handleInstall = async () => {
+		setInstalling(true);
+		try {
+			await plugin.installUpdate();
+		} finally {
+			setInstalling(false);
+		}
+	};
+
+	return (
+		<SettingRow
+			name={t(locale, "settingsUpdateName")}
+			description={
+				hasUpdate
+					? t(locale, "settingsUpdateAvailableDesc", { current, latest: latest ?? current })
+					: t(locale, "settingsUpdateUpToDateDesc", { current })
+			}
+			control={
+				<div className="ramen-update-controls">
+					<button disabled={checking} onClick={() => void handleCheck()}>
+						{checking ? t(locale, "settingsUpdateChecking") : t(locale, "settingsUpdateCheckNow")}
+					</button>
+					{hasUpdate && (
+						<button
+							className="mod-cta"
+							disabled={installing}
+							onClick={() => void handleInstall()}
+						>
+							{installing ? t(locale, "settingsUpdateInstalling") : t(locale, "settingsUpdateInstall")}
+						</button>
+					)}
+				</div>
+			}
+		/>
+	);
+}
+
+export function GeneralSection({ settings, save, plugin }: SectionProps & { plugin: RamenPlugin }) {
 	const locale = settings.language;
 	return (
 		<div>
@@ -79,6 +136,25 @@ export function GeneralSection({ settings, save }: SectionProps) {
 					</div>
 				}
 			/>
+			<SettingRow
+				name={t(locale, "settingsAutoUpdateCheckName")}
+				description={t(locale, "settingsAutoUpdateCheckDesc")}
+				control={
+					<div
+						className={`checkbox-container${settings.autoUpdateCheck ? " is-enabled" : ""}`}
+						onClick={() =>
+							void save({ autoUpdateCheck: !settings.autoUpdateCheck })
+						}
+					>
+						<input
+							type="checkbox"
+							readOnly
+							checked={settings.autoUpdateCheck}
+						/>
+					</div>
+				}
+			/>
+			<UpdateRow plugin={plugin} locale={locale} />
 		</div>
 	);
 }

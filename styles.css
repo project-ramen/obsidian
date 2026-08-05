@@ -197,6 +197,12 @@
 	gap: 8px;
 }
 
+.ramen-update-controls {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+}
+
 .ramen-blogs-add-btn {
 	background: none;
 	border: 1px dashed var(--background-modifier-border);

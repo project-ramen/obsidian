@@ -11,6 +11,7 @@ import { ReconnectModal } from './commands/reconnect/ReconnectModal';
 import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
 import { t } from './i18n';
 import { debugLog, setDebugMode } from './logger';
+import { fetchLatestRelease, installRelease, isNewerVersion } from './update-checker';
 
 export default class RamenPlugin extends Plugin {
 	settings!: RamenPluginSettings;
@@ -104,6 +105,12 @@ export default class RamenPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: 'check-for-updates',
+			name: t(this.settings.language, 'cmdCheckForUpdates'),
+			callback: () => { void this.checkForUpdates({ force: true }); },
+		});
+
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
 				if (!(file instanceof TFile) || !file.path.endsWith('.md')) return;
@@ -149,6 +156,7 @@ export default class RamenPlugin extends Plugin {
 				this.applyPublishedFileMarkers();
 				await this.refreshUploadedFromServer();
 			})();
+			void this.checkForUpdates();
 		});
 
 		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
@@ -740,5 +748,84 @@ export default class RamenPlugin extends Plugin {
 	async saveSettings() {
 		setDebugMode(this.settings.debugMode);
 		await this.saveData(this.settings);
+	}
+
+	/**
+	 * GitHub 릴리즈(project-ramen/obsidian)에서 최신 버전을 확인한다.
+	 * force가 아니면 `autoUpdateCheck` 설정과 마지막 확인 시각(12시간 쿨다운)을 따르고,
+	 * 쿨다운 중이면 이전에 캐시해둔 `latestKnownVersion`을 그대로 반환한다.
+	 */
+	async checkForUpdates(opts: { force?: boolean } = {}): Promise<{ hasUpdate: boolean; latestVersion: string | null }> {
+		const force = opts.force ?? false;
+
+		if (!force) {
+			if (!this.settings.autoUpdateCheck) {
+				return { hasUpdate: false, latestVersion: this.settings.latestKnownVersion ?? null };
+			}
+			const elapsed = Date.now() - this.settings.lastUpdateCheckAt;
+			if (elapsed < 12 * 60 * 60 * 1000) {
+				const cached = this.settings.latestKnownVersion ?? null;
+				return { hasUpdate: !!cached && isNewerVersion(cached, this.manifest.version), latestVersion: cached };
+			}
+		}
+
+		this.settings.lastUpdateCheckAt = Date.now();
+		const release = await fetchLatestRelease();
+		if (!release) {
+			await this.saveSettings();
+			if (force) new Notice(t(this.settings.language, 'updateCheckFailed'));
+			return { hasUpdate: false, latestVersion: this.settings.latestKnownVersion ?? null };
+		}
+
+		this.settings.latestKnownVersion = release.version;
+		await this.saveSettings();
+
+		const hasUpdate = isNewerVersion(release.version, this.manifest.version);
+		if (hasUpdate) {
+			new Notice(t(this.settings.language, 'updateAvailable', { version: release.version }), 8000);
+		} else if (force) {
+			new Notice(t(this.settings.language, 'updateUpToDate', { version: this.manifest.version }));
+		}
+		return { hasUpdate, latestVersion: release.version };
+	}
+
+	/** 최신 릴리즈의 main.js/manifest.json/styles.css를 내려받아 덮어쓴 뒤 플러그인 재로드를 시도한다. */
+	async installUpdate(): Promise<void> {
+		const release = await fetchLatestRelease();
+		if (!release || !isNewerVersion(release.version, this.manifest.version)) {
+			new Notice(t(this.settings.language, 'updateUpToDate', { version: this.manifest.version }));
+			return;
+		}
+
+		const notice = new Notice(t(this.settings.language, 'updateInstalling', { version: release.version }), 0);
+		try {
+			const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+			await installRelease(this.app, pluginDir, release);
+			notice.hide();
+			new Notice(t(this.settings.language, 'updateInstalled', { version: release.version }), 6000);
+			await this.reloadPlugin();
+		} catch (e) {
+			notice.hide();
+			new Notice(t(this.settings.language, 'updateFailed', { e: String(e) }), 8000);
+		}
+	}
+
+	/**
+	 * 내부 플러그인 매니저 API(공식 타입 없음)로 재로드를 시도한다.
+	 * 실패해도 파일은 이미 갱신됐으므로 조용히 넘어간다 — 사용자가 수동으로 새로고침하면 됨.
+	 */
+	private async reloadPlugin(): Promise<void> {
+		try {
+			const internalApp = this.app as unknown as {
+				plugins: {
+					disablePlugin(id: string): Promise<void>;
+					enablePlugin(id: string): Promise<void>;
+				};
+			};
+			await internalApp.plugins.disablePlugin(this.manifest.id);
+			await internalApp.plugins.enablePlugin(this.manifest.id);
+		} catch (e) {
+			debugLog('[ramen] 플러그인 자동 재로드 실패, 수동 새로고침 필요', e);
+		}
 	}
 }
