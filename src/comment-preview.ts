@@ -55,7 +55,7 @@ export class DeleteCommentModal extends Modal {
 }
 
 export class CommentPreviewManager {
-	private renderTimer: ReturnType<typeof setTimeout> | null = null;
+	private renderTimer: number | null = null;
 
 	constructor(private plugin: RamenPlugin) {}
 

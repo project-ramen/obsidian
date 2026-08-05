@@ -17,11 +17,11 @@ export default class RamenPlugin extends Plugin {
 	attachmentPreview!: AttachmentPreviewManager;
 	commentPreview!: CommentPreviewManager;
 
-	private _modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private _modifyTimers = new Map<string, number>();
 	private _pullingPaths = new Set<string>();
 	private _attachmentFolderStyleSheet: CSSStyleSheet | null = null;
 	private _publishedMarkerStyleSheet: CSSStyleSheet | null = null;
-	private _publishedMarkerTimer: ReturnType<typeof setTimeout> | null = null;
+	private _publishedMarkerTimer: number | null = null;
 	/** path → 공개(published)된 블로그 label. 서버에서 검증된 파일만 포함 (hover 툴팁용) */
 	private _publishedByPath = new Map<string, string>();
 	/** path → 업로드는 됐지만 아직 비공개(draft)인 블로그 label */
@@ -152,7 +152,8 @@ export default class RamenPlugin extends Plugin {
 		});
 
 		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
-			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]');
+			// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint's type info disagrees with `tsc`/`bun run build` here; closest() resolves to Element without this cast and fails the actual build (setTooltip expects HTMLElement).
+			const target = (evt.target as HTMLElement).closest?.('.nav-file-title[data-path]') as HTMLElement | null;
 			if (!target) return;
 			const path = target.getAttribute('data-path');
 			if (!path) return;
