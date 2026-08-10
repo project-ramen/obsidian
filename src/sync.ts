@@ -14,6 +14,8 @@ export interface PostDoc {
 	banner?: string | null;
 	banner_url?: string | null;
 	description?: string | null;
+	/** true(1)면 body_md를 마크다운 대신 raw HTML로 그대로 표시 (frontmatter html_mode) */
+	html_mode?: number;
 	deleted_at: string | null;
 	created_at: string;
 	updated_at: string;
@@ -280,6 +282,8 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 	const rawBannerUrl = typeof fm['banner-url'] === 'string' ? fm['banner-url'].trim() : '';
 	const banner_url = rawBannerUrl || null;
 
+	const html_mode = fm['html_mode'] === true || fm['html_mode'] === 1 ? 1 : 0;
+
 	const rawTags: unknown = fm['tags'];
 	const tags = normalizeTagsValue(rawTags);
 	if (typeof rawTags === 'string' && rawTags.trim()) {
@@ -315,6 +319,7 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 		banner,
 		banner_url,
 		description,
+		html_mode,
 		deleted_at: null,
 		created_at: typeof fm['created_at'] === 'string' ? fm['created_at'] : new Date(file.stat.ctime).toISOString(),
 		updated_at: new Date(file.stat.mtime).toISOString(),
@@ -357,6 +362,7 @@ function docToFileContent(doc: PostDoc): string {
 	if (doc.banner) lines.push(`banner: "${doc.banner.replace(/"/g, '\\"')}"`);
 	if (doc.banner_url) lines.push(`banner-url: "${doc.banner_url.replace(/"/g, '\\"')}"`);
 	if (doc.description) lines.push(`description: "${doc.description.replace(/"/g, '\\"')}"`);
+	if (doc.html_mode) lines.push('html_mode: true');
 	lines.push(`created_at: ${doc.created_at}`);
 	lines.push('---', '', doc.body_md);
 	return lines.join('\n');
