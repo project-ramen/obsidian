@@ -42,6 +42,26 @@ const STANDARD_IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
  *  이게 없으면 banner의 원본 [[link.png]] 위키링크가 서버에 업로드된 URL로 되돌아와 파일을 덮어써버림. */
 const lastLivePushedAt = new Map<string, string>();
 
+// 서버 업로드 URL → 업로드 당시 원본 파일명. 서버가 파일을 uuid로 저장해버려서(server/src/api.ts 업로드 엔드포인트)
+// URL만으로는 원본 이름을 알 수 없음 — pull 시 이 매핑으로 파일명을 원복. localStorage에 저장해 플러그인 재시작 후에도 유지.
+function uploadedFilenameKey(blogId: string, url: string): string {
+	return `ramen-uploaded-filename-${blogId}:${url}`;
+}
+function rememberUploadedFilename(blogId: string, url: string, filename: string): void {
+	try {
+		localStorage.setItem(uploadedFilenameKey(blogId, url), filename);
+	} catch (e) {
+		debugLog(`[ramen] 업로드 파일명 기억 실패 (무해함, URL에서 유추한 이름으로 대체됨): ${url}`, e);
+	}
+}
+function recallUploadedFilename(blogId: string, url: string): string | null {
+	try {
+		return localStorage.getItem(uploadedFilenameKey(blogId, url));
+	} catch {
+		return null;
+	}
+}
+
 /** Obsidian requestUrl은 FormData를 지원하지 않아 multipart/form-data 바디를 직접 구성. */
 function buildMultipartBody(fieldName: string, filename: string, mime: string, data: ArrayBuffer): { body: ArrayBuffer; contentType: string } {
 	const boundary = `----ramenBoundary${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
@@ -92,6 +112,7 @@ async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Pr
 		}
 		debugLog(`[ramen] 이미지 업로드 성공: ${imageFile.path} → ${url}`);
 		uploadedImageCache.set(cacheKey, url);
+		rememberUploadedFilename(blog.id, url, imageFile.name);
 		return url;
 	} catch (e) {
 		console.warn(`[ramen] 이미지 업로드 실패: ${imageFile.path}`, e);
@@ -210,7 +231,8 @@ async function downloadServerImage(app: App, blog: BlogConfig, url: string, refe
 			console.warn(`[ramen pull] 이미지 다운로드 실패 (${res.status}): ${absoluteUrl}`);
 			return null;
 		}
-		const rawName = decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
+		// 업로드 당시 기억해둔 원본 파일명이 있으면 그걸로 복원, 없으면(다른 경로로 업로드된 경우 등) URL에서 유추
+		const rawName = recallUploadedFilename(blog.id, url) ?? decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
 		const availablePath = await app.fileManager.getAvailablePathForAttachment(rawName, referenceFilePath);
 		const file = await app.vault.createBinary(normalizePath(availablePath), res.arrayBuffer);
 		downloadedImageCache.set(cacheKey, file);
