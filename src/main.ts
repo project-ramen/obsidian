@@ -1,4 +1,4 @@
-import { Editor, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl, setTooltip } from 'obsidian';
+import { Editor, MarkdownView, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl, setTooltip } from 'obsidian';
 import { BlogConfig, DEFAULT_SETTINGS, RamenPluginSettings, RamenSettingTab } from './settings';
 import { AttachmentPreviewManager } from './attachment-preview';
 import { CommentPreviewManager } from './comment-preview';
@@ -6,6 +6,7 @@ import { InsertImageModal } from './commands/insert-image/InsertImageModal';
 import { AllCommentsModal } from './commands/all-comments/AllCommentsModal';
 import { deletedPostDoc, fileToPostDoc, isInTrashbin, publishToBlog, pushFileLive, slugFromPath, syncBlog } from './sync';
 import { PullModal } from './commands/pull/PullModal';
+import { HTML_EDITOR_VIEW_TYPE, HtmlEditorView, autoSwapToHtmlEditorIfNeeded, isHtmlModeFile, swapLeafToHtmlEditor, switchToMarkdownTemporarily } from './commands/html-editor/HtmlEditorView';
 import { PublishModal } from './commands/publish/PublishModal';
 import { ReconnectModal } from './commands/reconnect/ReconnectModal';
 import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
@@ -35,6 +36,8 @@ export default class RamenPlugin extends Plugin {
 	private _lastSyncFailureNoticeAt = new Map<string, number>();
 	/** 이번 세션에서 서버 검증에 성공한 블로그 rootFolder 집합. 검증된 블로그는 frontmatter 대신 서버 응답을 신뢰함 */
 	private _verifiedBlogRoots = new Set<string>();
+	/** "HTML 모드로 전환" 아이콘을 이미 추가한 MarkdownView 인스턴스 (같은 leaf가 재사용될 때 중복 추가 방지) */
+	private _markdownViewsWithHtmlModeAction = new WeakSet<MarkdownView>();
 
 	async onload() {
 		await this.loadSettings();
@@ -47,6 +50,11 @@ export default class RamenPlugin extends Plugin {
 		this.commentPreview.register();
 
 		this.addSettingTab(new RamenSettingTab(this.app, this));
+
+		this.registerView(
+			HTML_EDITOR_VIEW_TYPE,
+			(leaf) => new HtmlEditorView(leaf, this.settings.language, this.settings.htmlEditorDefaultTab),
+		);
 
 		this.addCommand({
 			id: 'insert-image',
@@ -130,6 +138,17 @@ export default class RamenPlugin extends Plugin {
 			callback: () => { void this.checkForUpdates({ force: true }); },
 		});
 
+		// html_mode 노트를 보여주는 leaf가 활성화될 때마다(파일 탐색기 클릭, 탭 전환, 링크 이동, split 등)
+		// 기본 마크다운 보기 대신 HTML 편집기로 자동 전환. file-open보다 active-leaf-change가 항상 실제
+		// leaf를 직접 넘겨줘서 어떤 leaf를 바꿔야 할지 다시 찾을 필요가 없고 더 확실하게 잡힘.
+		this.registerEvent(
+			this.app.workspace.on('active-leaf-change', (leaf) => {
+				if (!leaf) return;
+				if (leaf.view instanceof MarkdownView) this.ensureHtmlModeAction(leaf.view);
+				void autoSwapToHtmlEditorIfNeeded(leaf, this.settings.htmlEditorAutoSwitch);
+			}),
+		);
+
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
 				if (!(file instanceof TFile) || !file.path.endsWith('.md')) return;
@@ -176,6 +195,11 @@ export default class RamenPlugin extends Plugin {
 				await this.refreshUploadedFromServer();
 			})();
 			void this.checkForUpdates();
+			// Obsidian 재시작 등으로 html_mode 노트가 이미 마크다운 탭으로 열려있는 채로 시작한 경우도 전환.
+			for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+				if (leaf.view instanceof MarkdownView) this.ensureHtmlModeAction(leaf.view);
+				void autoSwapToHtmlEditorIfNeeded(leaf, this.settings.htmlEditorAutoSwitch);
+			}
 		});
 
 		this.registerDomEvent(document, 'mouseover', (evt: MouseEvent) => {
@@ -204,47 +228,70 @@ export default class RamenPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.workspace.on('file-menu', (menu: Menu, abstractFile: TAbstractFile) => {
+			this.app.workspace.on('file-menu', (menu: Menu, abstractFile: TAbstractFile, _source: string, leaf) => {
 				if (!(abstractFile instanceof TFile) || !abstractFile.path.endsWith('.md')) return;
 				const blogs = this.blogsForPath(abstractFile.path).filter(b => b.link && b.password && b.connectedAt);
-				if (!blogs.length) return;
 
-				const fm = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
-				const fmPublished = fm?.published === true || fm?.published === 1;
+				// 블로그 발행/비공개/삭제 항목 — 연결된 블로그가 있는 파일에서만. 아래 html_mode 관련
+				// 항목들은 블로그 연결 여부와 무관하게 항상 나와야 하므로 여기서 return하지 않고 분리.
+				if (blogs.length > 0) {
+					const fm = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
+					const fmPublished = fm?.published === true || fm?.published === 1;
 
-				// 블로그별 공개 상태 판단: 서버 검증된 블로그는 published 블로그 id 집합을 신뢰,
-				// 아직 검증 안 된 블로그는 frontmatter로 대체 (applyPublishedFileMarkers와 동일한 규칙).
-				const publishedBlogIds = this._publishedBlogIdsByPath.get(abstractFile.path);
-				const privateBlogs = blogs.filter(blog => {
-					const root = blog.rootFolder.replace(/\/+$/, '');
-					const verified = root !== '' && this._verifiedBlogRoots.has(root);
-					const isPublished = verified ? (publishedBlogIds?.has(blog.id) ?? false) : fmPublished;
-					return !isPublished;
-				});
-				const publishedBlogs = blogs.filter(blog => !privateBlogs.includes(blog));
+					// 블로그별 공개 상태 판단: 서버 검증된 블로그는 published 블로그 id 집합을 신뢰,
+					// 아직 검증 안 된 블로그는 frontmatter로 대체 (applyPublishedFileMarkers와 동일한 규칙).
+					const publishedBlogIds = this._publishedBlogIdsByPath.get(abstractFile.path);
+					const privateBlogs = blogs.filter(blog => {
+						const root = blog.rootFolder.replace(/\/+$/, '');
+						const verified = root !== '' && this._verifiedBlogRoots.has(root);
+						const isPublished = verified ? (publishedBlogIds?.has(blog.id) ?? false) : fmPublished;
+						return !isPublished;
+					});
+					const publishedBlogs = blogs.filter(blog => !privateBlogs.includes(blog));
+
+					menu.addSeparator();
+
+					if (privateBlogs.length > 0) {
+						menu.addItem(item => item
+							.setTitle(t(this.settings.language, 'menuSwitchToPublic'))
+							.setIcon('upload')
+							.onClick(() => void this.togglePostPublished(abstractFile, privateBlogs, true))
+						);
+					}
+					if (publishedBlogs.length > 0) {
+						menu.addItem(item => item
+							.setTitle(t(this.settings.language, 'menuSwitchToPrivate'))
+							.setIcon('eye-off')
+							.onClick(() => void this.togglePostPublished(abstractFile, publishedBlogs, false))
+						);
+					}
+
+					menu.addItem(item => item
+						.setTitle(t(this.settings.language, 'menuRemoveFromBlog'))
+						.setIcon('trash-2')
+						.onClick(() => void this.removePostFromBlog(abstractFile, blogs))
+					);
+				}
 
 				menu.addSeparator();
 
-				if (privateBlogs.length > 0) {
-					menu.addItem(item => item
-						.setTitle(t(this.settings.language, 'menuSwitchToPublic'))
-						.setIcon('upload')
-						.onClick(() => void this.togglePostPublished(abstractFile, privateBlogs, true))
-					);
-				}
-				if (publishedBlogs.length > 0) {
-					menu.addItem(item => item
-						.setTitle(t(this.settings.language, 'menuSwitchToPrivate'))
-						.setIcon('eye-off')
-						.onClick(() => void this.togglePostPublished(abstractFile, publishedBlogs, false))
-					);
-				}
-
+				const htmlMode = isHtmlModeFile(this.app, abstractFile);
 				menu.addItem(item => item
-					.setTitle(t(this.settings.language, 'menuRemoveFromBlog'))
-					.setIcon('trash-2')
-					.onClick(() => void this.removePostFromBlog(abstractFile, blogs))
+					.setTitle(t(this.settings.language, htmlMode ? 'menuSwitchToMarkdownMode' : 'menuSwitchToHtmlMode'))
+					.setIcon('code')
+					.onClick(() => void this.toggleHtmlMode(abstractFile, !htmlMode))
 				);
+
+				// html_mode는 켠 채로, 지금 화면만 잠깐 마크다운으로 봄(속성 편집 등). HTML 편집기로 보고
+				// 있는 leaf에서만 의미가 있음 (미리보기 분할은 그 뷰 헤더의 전용 아이콘으로 제공 — 이 메뉴는
+				// 뷰 안에서 여는 core "..."에서는 뜨지 않아서 옮김: HtmlEditorView.showSplitPreviewMenu 참고).
+				if (leaf && leaf.view.getViewType() === HTML_EDITOR_VIEW_TYPE) {
+					menu.addItem(item => item
+						.setTitle(t(this.settings.language, 'htmlEditorOpenAsMarkdown'))
+						.setIcon('file-text')
+						.onClick(() => void switchToMarkdownTemporarily(leaf, abstractFile.path))
+					);
+				}
 			}),
 		);
 	}
@@ -764,6 +811,53 @@ export default class RamenPlugin extends Plugin {
 				notice.hide();
 				new Notice(t(this.settings.language, 'noticeRemoveError', { name, e: String(e) }), 5000);
 			}
+		}
+	}
+
+	/**
+	 * frontmatter의 html_mode를 켜고/끄고, 지금 그 파일을 보고 있는 leaf가 있으면 뷰도 즉시 맞춰 바꾼다.
+	 * (켤 때: markdown → HTML 편집기, 끌 때: HTML 편집기 → markdown. 다른 파일을 보고 있으면 뷰는 안 건드림 —
+	 *  다음에 그 파일을 열 때 autoSwapToHtmlEditorIfNeeded가 알아서 처리함.)
+	 */
+	private async toggleHtmlMode(file: TFile, enable: boolean): Promise<void> {
+		await this.app.fileManager.processFrontMatter(file, (fm: { html_mode?: boolean }) => {
+			if (enable) fm.html_mode = true;
+			else delete fm.html_mode;
+		});
+
+		if (enable) {
+			const leaf = this.app.workspace.getLeavesOfType('markdown')
+				.find(l => l.view instanceof MarkdownView && l.view.file?.path === file.path);
+			if (leaf) await swapLeafToHtmlEditor(leaf, file);
+		} else {
+			const leaf = this.app.workspace.getLeavesOfType(HTML_EDITOR_VIEW_TYPE)
+				.find(l => l.view instanceof HtmlEditorView && l.view.file?.path === file.path);
+			if (leaf) await leaf.setViewState({ type: 'markdown', state: { file: file.path } });
+		}
+	}
+
+	/**
+	 * 일반 마크다운 뷰에도 HTML 편집기로 넘어갈 수 있는 아이콘을 달아준다 — HTML 편집기 쪽엔
+	 * "마크다운으로 보기" 아이콘이 있는데 반대 방향(마크다운 → HTML 모드)은 파일 메뉴에만 있어서
+	 * 눈에 잘 안 띄었음. 같은 view 인스턴스에 중복으로 추가되지 않도록 WeakSet으로 추적.
+	 */
+	private ensureHtmlModeAction(view: MarkdownView): void {
+		if (this._markdownViewsWithHtmlModeAction.has(view)) return;
+		this._markdownViewsWithHtmlModeAction.add(view);
+		const actionEl = view.addAction('code', t(this.settings.language, 'menuSwitchToHtmlMode'), () => {
+			if (view.file) void this.toggleHtmlMode(view.file, true);
+		});
+
+		// addAction은 네이티브 아이콘들보다 앞(왼쪽)에 꽂힘 — 편집/읽기 모드 전환 아이콘 바로 옆으로 옮김.
+		// aria-label로 그 아이콘을 찾아서 바로 뒤에 삽입, 못 찾으면 대충 중간 위치로 폴백.
+		const container = actionEl.parentElement;
+		if (!container) return;
+		const siblings = Array.from(container.children).filter((el) => el !== actionEl);
+		const modeToggle = siblings.find((el) => /reading|edit|읽기|편집/i.test(el.getAttribute('aria-label') ?? ''));
+		if (modeToggle) {
+			modeToggle.insertAdjacentElement('afterend', actionEl);
+		} else if (siblings.length > 0) {
+			container.insertBefore(actionEl, siblings[Math.floor(siblings.length / 2)] ?? null);
 		}
 	}
 

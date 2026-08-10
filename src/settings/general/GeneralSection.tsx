@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { SectionProps, RamenPluginSettings } from "../types";
-import { SettingRow } from "../components";
+import { SectionProps } from "../types";
+import { IconDropdown, SettingGroup, SettingRow } from "../components";
 import { t, Locale } from "../../i18n";
 import RamenPlugin from "../../main";
 import { isNewerVersion } from "../../update-checker";
@@ -68,54 +68,14 @@ export function GeneralSection({ settings, save, plugin }: SectionProps & { plug
 				name={t(locale, "settingsLanguageName")}
 				description={t(locale, "settingsLanguageDesc")}
 				control={
-					<select
+					<IconDropdown
 						value={settings.language}
-						onChange={(e) =>
-							void save({
-								language: e.target
-									.value as RamenPluginSettings["language"],
-							})
-						}
-					>
-						<option value="ko">한국어</option>
-						<option value="en">English</option>
-					</select>
-				}
-			/>
-			<SettingRow
-				name={t(locale, "settingsShowDotfilesName")}
-				description={t(locale, "settingsShowDotfilesDesc")}
-				control={
-					<div
-						className={`checkbox-container${settings.showDotfiles ? " is-enabled" : ""}`}
-						onClick={() =>
-							void save({ showDotfiles: !settings.showDotfiles })
-						}
-					>
-						<input
-							type="checkbox"
-							readOnly
-							checked={settings.showDotfiles}
-						/>
-					</div>
-				}
-			/>
-			<SettingRow
-				name={t(locale, "settingsDotfilesSyncName")}
-				description={t(locale, "settingsDotfilesSyncDesc")}
-				control={
-					<div
-						className={`checkbox-container${settings.dotfilesSync ? " is-enabled" : ""}`}
-						onClick={() =>
-							void save({ dotfilesSync: !settings.dotfilesSync })
-						}
-					>
-						<input
-							type="checkbox"
-							readOnly
-							checked={settings.dotfilesSync}
-						/>
-					</div>
+						onChange={(v) => void save({ language: v })}
+						options={[
+							{ value: "ko", label: "한국어", icon: "languages" },
+							{ value: "en", label: "English", icon: "languages" },
+						]}
+					/>
 				}
 			/>
 			<SettingRow
@@ -136,25 +96,104 @@ export function GeneralSection({ settings, save, plugin }: SectionProps & { plug
 					</div>
 				}
 			/>
-			<SettingRow
-				name={t(locale, "settingsAutoUpdateCheckName")}
-				description={t(locale, "settingsAutoUpdateCheckDesc")}
-				control={
-					<div
-						className={`checkbox-container${settings.autoUpdateCheck ? " is-enabled" : ""}`}
-						onClick={() =>
-							void save({ autoUpdateCheck: !settings.autoUpdateCheck })
-						}
-					>
-						<input
-							type="checkbox"
-							readOnly
-							checked={settings.autoUpdateCheck}
+
+			<SettingGroup heading={t(locale, "settingsGroupDotfiles")}>
+				<SettingRow
+					name={t(locale, "settingsShowDotfilesName")}
+					description={t(locale, "settingsShowDotfilesDesc")}
+					control={
+						<div
+							className={`checkbox-container${settings.showDotfiles ? " is-enabled" : ""}`}
+							onClick={() =>
+								void save({ showDotfiles: !settings.showDotfiles })
+							}
+						>
+							<input
+								type="checkbox"
+								readOnly
+								checked={settings.showDotfiles}
+							/>
+						</div>
+					}
+				/>
+				<SettingRow
+					name={t(locale, "settingsDotfilesSyncName")}
+					description={t(locale, "settingsDotfilesSyncDesc")}
+					control={
+						<div
+							className={`checkbox-container${settings.dotfilesSync ? " is-enabled" : ""}`}
+							onClick={() =>
+								void save({ dotfilesSync: !settings.dotfilesSync })
+							}
+						>
+							<input
+								type="checkbox"
+								readOnly
+								checked={settings.dotfilesSync}
+							/>
+						</div>
+					}
+				/>
+			</SettingGroup>
+
+			<SettingGroup heading={t(locale, "settingsGroupHtmlEditor")}>
+				<SettingRow
+					name={t(locale, "settingsHtmlEditorAutoSwitchName")}
+					description={t(locale, "settingsHtmlEditorAutoSwitchDesc")}
+					control={
+						<div
+							className={`checkbox-container${settings.htmlEditorAutoSwitch ? " is-enabled" : ""}`}
+							onClick={() =>
+								void save({ htmlEditorAutoSwitch: !settings.htmlEditorAutoSwitch })
+							}
+						>
+							<input
+								type="checkbox"
+								readOnly
+								checked={settings.htmlEditorAutoSwitch}
+							/>
+						</div>
+					}
+				/>
+				<SettingRow
+					name={t(locale, "settingsHtmlEditorDefaultTabName")}
+					description={t(locale, "settingsHtmlEditorDefaultTabDesc")}
+					control={
+						<IconDropdown
+							value={settings.htmlEditorDefaultTab}
+							onChange={(v) => void save({ htmlEditorDefaultTab: v })}
+							options={[
+								{ value: "preview", label: t(locale, "htmlEditorTabPreview"), icon: "eye" },
+								{ value: "html", label: "HTML", icon: "code" },
+								{ value: "css", label: "CSS", icon: "palette" },
+								{ value: "js", label: "JS", icon: "braces" },
+							]}
 						/>
-					</div>
-				}
-			/>
-			<UpdateRow plugin={plugin} locale={locale} />
+					}
+				/>
+			</SettingGroup>
+
+			<SettingGroup heading={t(locale, "settingsGroupUpdate")}>
+				<SettingRow
+					name={t(locale, "settingsAutoUpdateCheckName")}
+					description={t(locale, "settingsAutoUpdateCheckDesc")}
+					control={
+						<div
+							className={`checkbox-container${settings.autoUpdateCheck ? " is-enabled" : ""}`}
+							onClick={() =>
+								void save({ autoUpdateCheck: !settings.autoUpdateCheck })
+							}
+						>
+							<input
+								type="checkbox"
+								readOnly
+								checked={settings.autoUpdateCheck}
+							/>
+						</div>
+					}
+				/>
+				<UpdateRow plugin={plugin} locale={locale} />
+			</SettingGroup>
 		</div>
 	);
 }

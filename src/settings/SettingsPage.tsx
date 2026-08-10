@@ -53,7 +53,7 @@ export function SettingsPage({ plugin }: { plugin: RamenPlugin }) {
 		}
 	};
 
-	const sections: Section[] = ["blogs", "appearance", "general"];
+	const sections: Section[] = ["blogs", "general", "appearance"];
 
 	return (
 		<div className="ramen-settings-container">

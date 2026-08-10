@@ -1,6 +1,6 @@
 import React from "react";
-import { SectionProps, RamenPluginSettings } from "../types";
-import { SettingRow } from "../components";
+import { SectionProps } from "../types";
+import { IconDropdown, SettingGroup, SettingRow } from "../components";
 import { t } from "../../i18n";
 
 export function AppearanceSection({ settings, save }: SectionProps) {
@@ -11,66 +11,55 @@ export function AppearanceSection({ settings, save }: SectionProps) {
 				name={t(locale, "settingsThemeColorName")}
 				description={t(locale, "settingsThemeColorDesc")}
 				control={
-					<select
+					<IconDropdown
 						value={settings.themeColor}
-						onChange={(e) =>
-							void save({
-								themeColor: e.target
-									.value as RamenPluginSettings["themeColor"],
-							})
-						}
-					>
-						<option value="system">
-							{t(locale, "settingsThemeFollowObsidian")}
-						</option>
-						<option value="dark">{t(locale, "settingsThemeDark")}</option>
-						<option value="light">{t(locale, "settingsThemeLight")}</option>
-					</select>
+						onChange={(v) => void save({ themeColor: v })}
+						options={[
+							{ value: "system", label: t(locale, "settingsThemeFollowObsidian"), icon: "monitor" },
+							{ value: "dark", label: t(locale, "settingsThemeDark"), icon: "moon" },
+							{ value: "light", label: t(locale, "settingsThemeLight"), icon: "sun" },
+						]}
+					/>
 				}
 			/>
-			<SettingRow
-				name={t(locale, "settingsAttachmentLocationName")}
-				description={t(locale, "settingsAttachmentLocationDesc")}
-				control={
-					<select
-						value={settings.attachmentLocation}
-						onChange={(e) =>
-							void save({
-								attachmentLocation: e.target
-									.value as RamenPluginSettings["attachmentLocation"],
-							})
-						}
-					>
-						<option value="bottom">
-							{t(locale, "settingsAttachmentLocationBottom")}
-						</option>
-						<option value="top">
-							{t(locale, "settingsAttachmentLocationTop")}
-						</option>
-					</select>
-				}
-			/>
-			<SettingRow
-				name={t(locale, "settingsHideAttachmentFolderName")}
-				description={t(locale, "settingsHideAttachmentFolderDesc")}
-				control={
-					<div
-						className={`checkbox-container${settings.hideAttachmentFolder ? " is-enabled" : ""}`}
-						onClick={() =>
-							void save({
-								hideAttachmentFolder:
-									!settings.hideAttachmentFolder,
-							})
-						}
-					>
-						<input
-							type="checkbox"
-							readOnly
-							checked={settings.hideAttachmentFolder}
+
+			<SettingGroup heading={t(locale, "settingsGroupAttachment")}>
+				<SettingRow
+					name={t(locale, "settingsAttachmentLocationName")}
+					description={t(locale, "settingsAttachmentLocationDesc")}
+					control={
+						<IconDropdown
+							value={settings.attachmentLocation}
+							onChange={(v) => void save({ attachmentLocation: v })}
+							options={[
+								{ value: "bottom", label: t(locale, "settingsAttachmentLocationBottom"), icon: "arrow-down-to-line" },
+								{ value: "top", label: t(locale, "settingsAttachmentLocationTop"), icon: "arrow-up-to-line" },
+							]}
 						/>
-					</div>
-				}
-			/>
+					}
+				/>
+				<SettingRow
+					name={t(locale, "settingsHideAttachmentFolderName")}
+					description={t(locale, "settingsHideAttachmentFolderDesc")}
+					control={
+						<div
+							className={`checkbox-container${settings.hideAttachmentFolder ? " is-enabled" : ""}`}
+							onClick={() =>
+								void save({
+									hideAttachmentFolder:
+										!settings.hideAttachmentFolder,
+								})
+							}
+						>
+							<input
+								type="checkbox"
+								readOnly
+								checked={settings.hideAttachmentFolder}
+							/>
+						</div>
+					}
+				/>
+			</SettingGroup>
 		</div>
 	);
 }

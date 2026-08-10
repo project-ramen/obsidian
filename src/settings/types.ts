@@ -24,6 +24,11 @@ export interface RamenPluginSettings {
 	lastUpdateCheckAt: number;
 	/** 마지막 확인에서 알아낸 최신 버전 (설정 UI 표시용 캐시) */
 	latestKnownVersion?: string;
+	/** html_mode 노트를 열 때 처음 보여줄 탭 (HtmlEditorView.Tab과 동일한 값 집합). */
+	htmlEditorDefaultTab: 'preview' | 'html' | 'css' | 'js';
+	/** html_mode 노트를 열 때 HTML 편집기로 자동 전환할지. 꺼두면 일반 마크다운 편집기로 열리고,
+	 *  "..." 메뉴나 헤더 아이콘으로 수동으로만 HTML 편집기로 전환할 수 있음. */
+	htmlEditorAutoSwitch: boolean;
 }
 
 export const DEFAULT_SETTINGS: RamenPluginSettings = {
@@ -37,6 +42,8 @@ export const DEFAULT_SETTINGS: RamenPluginSettings = {
 	debugMode: false,
 	autoUpdateCheck: true,
 	lastUpdateCheckAt: 0,
+	htmlEditorDefaultTab: 'html',
+	htmlEditorAutoSwitch: true,
 };
 
 export interface SectionProps {
