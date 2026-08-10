@@ -32,10 +32,16 @@ const IMAGE_MIME: Record<string, string> = {
 	webp: 'image/webp',
 	svg: 'image/svg+xml',
 };
-/** 로컬 vault 이미지 → 업로드된 서버 URL 캐시. key: "blogId:path:mtime" (블로그별로 구분 — 같은 이미지를 다른 블로그로 올린 URL이 잘못 재사용되는 것 방지).
- *  플러그인 재로드 시 초기화, 무해함 — 재업로드만 될 뿐. */
+/** 이미지 내용 해시(blogId:sha256) → 업로드된 서버 URL 캐시(메모리, 세션 내 재해시 방지용). 영속 캐시는 uploadedHashKey 참고. */
 const uploadedImageCache = new Map<string, string>();
 const STANDARD_IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+/** ArrayBuffer의 SHA-256 hex digest. 같은 내용이면 파일 경로·이름·mtime이 달라도 같은 값이 나옴 —
+ *  "같은 이미지가 여러 번 업로드되는" 문제를 파일 메타데이터가 아니라 실제 바이트 내용 기준으로 막기 위함. */
+async function hashArrayBuffer(data: ArrayBuffer): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', data);
+	return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 /** blogId:filePath → pushFileLive가 마지막으로 보낸 updated_at. 이후 sync가 같은 문서를 pull해오면
  *  (서버가 우리가 방금 보낸 그 push를 그대로 되돌려준 echo) 로컬 파일을 덮어쓰지 않도록 구분하는 용도.
@@ -62,6 +68,26 @@ function recallUploadedFilename(blogId: string, url: string): string | null {
 	}
 }
 
+// 이미지 내용 해시 → 업로드된 서버 URL. localStorage에 저장해 플러그인 재시작 후에도 유지 —
+// 이게 없으면 재시작할 때마다 내용이 안 바뀐 이미지도 매번 새로 업로드돼서 서버에 중복 파일이 쌓임.
+function uploadedHashKey(blogId: string, hash: string): string {
+	return `ramen-uploaded-hash-${blogId}:${hash}`;
+}
+function rememberUploadedUrlByHash(blogId: string, hash: string, url: string): void {
+	try {
+		localStorage.setItem(uploadedHashKey(blogId, hash), url);
+	} catch (e) {
+		debugLog(`[ramen] 업로드 해시 기억 실패 (무해함, 다음에 다시 업로드될 수 있음): ${hash}`, e);
+	}
+}
+function recallUploadedUrlByHash(blogId: string, hash: string): string | null {
+	try {
+		return localStorage.getItem(uploadedHashKey(blogId, hash));
+	} catch {
+		return null;
+	}
+}
+
 /** Obsidian requestUrl은 FormData를 지원하지 않아 multipart/form-data 바디를 직접 구성. */
 function buildMultipartBody(fieldName: string, filename: string, mime: string, data: ArrayBuffer): { body: ArrayBuffer; contentType: string } {
 	const boundary = `----ramenBoundary${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
@@ -80,17 +106,21 @@ function buildMultipartBody(fieldName: string, filename: string, mime: string, d
 }
 
 async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Promise<string | null> {
-	const cacheKey = `${blog.id}:${imageFile.path}:${imageFile.stat.mtime}`;
-	const cached = uploadedImageCache.get(cacheKey);
+	const data = await app.vault.readBinary(imageFile);
+	const hash = await hashArrayBuffer(data);
+	const cacheKey = `${blog.id}:${hash}`;
+
+	// 내용이 완전히 같은 이미지는 파일 경로·이름·mtime이 달라도(예: 사본, pull 시 다시 받은 동일 이미지) 재업로드하지 않음
+	const cached = uploadedImageCache.get(cacheKey) ?? recallUploadedUrlByHash(blog.id, hash);
 	if (cached) {
-		debugLog(`[ramen] 이미지 업로드 캐시 사용: ${imageFile.path} → ${cached}`);
+		debugLog(`[ramen] 이미지 업로드 스킵 (동일 내용 이미 업로드됨): ${imageFile.path} → ${cached}`);
+		uploadedImageCache.set(cacheKey, cached);
 		return cached;
 	}
 
 	const target = `${blog.link}/api/uploads`;
 	debugLog(`[ramen] 이미지 업로드 시작: ${imageFile.path} (${imageFile.stat.size} bytes) → ${target}`);
 	try {
-		const data = await app.vault.readBinary(imageFile);
 		const ext = imageFile.extension.toLowerCase();
 		const mime = IMAGE_MIME[ext] ?? 'application/octet-stream';
 		const { body, contentType } = buildMultipartBody('file', imageFile.name, mime, data);
@@ -112,6 +142,7 @@ async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Pr
 		}
 		debugLog(`[ramen] 이미지 업로드 성공: ${imageFile.path} → ${url}`);
 		uploadedImageCache.set(cacheKey, url);
+		rememberUploadedUrlByHash(blog.id, hash, url);
 		rememberUploadedFilename(blog.id, url, imageFile.name);
 		return url;
 	} catch (e) {
@@ -225,14 +256,24 @@ async function downloadServerImage(app: App, blog: BlogConfig, url: string, refe
 	}
 
 	const absoluteUrl = /^https?:\/\//.test(url) ? url : `${blog.link.replace(/\/+$/, '')}${url}`;
+	// 업로드 당시 기억해둔 원본 파일명이 있으면 그걸로 복원, 없으면(다른 경로로 업로드된 경우 등) URL에서 유추
+	const rawName = recallUploadedFilename(blog.id, url) ?? decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
+
+	// vault에 같은 이름의 파일이 이미 있으면(애초에 그 이미지를 push했던 로컬 원본이거나 이미 한 번 pull된 경우)
+	// 새로 받지 않고 그대로 재사용 — 안 하면 getAvailablePathForAttachment가 "파일명 1.png" 식으로 매번 중복 생성함.
+	const existing = app.metadataCache.getFirstLinkpathDest(rawName, referenceFilePath);
+	if (existing instanceof TFile) {
+		debugLog(`[ramen pull] vault에 이미 있는 이미지 재사용 (다운로드 스킵): ${rawName} → ${existing.path}`);
+		downloadedImageCache.set(cacheKey, existing);
+		return existing;
+	}
+
 	try {
 		const res = await requestUrl({ url: absoluteUrl, method: 'GET', throw: false });
 		if (res.status !== 200) {
 			console.warn(`[ramen pull] 이미지 다운로드 실패 (${res.status}): ${absoluteUrl}`);
 			return null;
 		}
-		// 업로드 당시 기억해둔 원본 파일명이 있으면 그걸로 복원, 없으면(다른 경로로 업로드된 경우 등) URL에서 유추
-		const rawName = recallUploadedFilename(blog.id, url) ?? decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
 		const availablePath = await app.fileManager.getAvailablePathForAttachment(rawName, referenceFilePath);
 		const file = await app.vault.createBinary(normalizePath(availablePath), res.arrayBuffer);
 		downloadedImageCache.set(cacheKey, file);
