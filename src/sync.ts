@@ -187,6 +187,72 @@ async function resolveBannerImage(app: App, file: TFile, blog: BlogConfig, raw: 
 	return url ?? trimmed;
 }
 
+/** 서버 업로드 URL(/uploads/...) → 다운로드해서 저장한 로컬 TFile 캐시. key: "blogId:url". */
+const downloadedImageCache = new Map<string, TFile>();
+const SERVER_UPLOAD_MD_IMAGE_RE = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
+
+/**
+ * 서버의 /uploads/... 상대경로 이미지를 vault 첨부파일 폴더로 다운로드하고 로컬 TFile을 반환.
+ * 이미 다운로드한 적 있으면 캐시된 파일을 재사용. 실패 시 null.
+ */
+async function downloadServerImage(app: App, blog: BlogConfig, url: string, referenceFilePath: string): Promise<TFile | null> {
+	const cacheKey = `${blog.id}:${url}`;
+	const cached = downloadedImageCache.get(cacheKey);
+	if (cached && app.vault.getAbstractFileByPath(cached.path) === cached) {
+		debugLog(`[ramen pull] 이미지 다운로드 캐시 사용: ${url} → ${cached.path}`);
+		return cached;
+	}
+
+	const absoluteUrl = /^https?:\/\//.test(url) ? url : `${blog.link.replace(/\/+$/, '')}${url}`;
+	try {
+		const res = await requestUrl({ url: absoluteUrl, method: 'GET', throw: false });
+		if (res.status !== 200) {
+			console.warn(`[ramen pull] 이미지 다운로드 실패 (${res.status}): ${absoluteUrl}`);
+			return null;
+		}
+		const rawName = decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
+		const availablePath = await app.fileManager.getAvailablePathForAttachment(rawName, referenceFilePath);
+		const file = await app.vault.createBinary(normalizePath(availablePath), res.arrayBuffer);
+		downloadedImageCache.set(cacheKey, file);
+		debugLog(`[ramen pull] 이미지 다운로드 성공: ${absoluteUrl} → ${file.path}`);
+		return file;
+	} catch (e) {
+		console.warn(`[ramen pull] 이미지 다운로드 실패: ${absoluteUrl}`, e);
+		return null;
+	}
+}
+
+/**
+ * pull된 doc.banner가 우리 서버의 업로드 경로(/uploads/...)면 vault로 다운로드하고 위키링크로 치환해서 반환.
+ * 이미 위키링크거나 외부 URL이면 그대로 반환 — 다운로드 실패 시에도 원본 값 그대로 반환(정보 손실 방지).
+ */
+async function localizeBannerForPull(app: App, blog: BlogConfig, banner: string | null | undefined, referenceFilePath: string): Promise<string | null> {
+	if (!banner) return banner ?? null;
+	if (!banner.startsWith('/uploads/')) return banner;
+	const file = await downloadServerImage(app, blog, banner, referenceFilePath);
+	return file ? `[[${file.name}]]` : banner;
+}
+
+/**
+ * pull된 body_md 안의 서버 업로드 이미지(`![alt](/uploads/...)`)를 vault로 다운로드하고
+ * 위키링크 임베드(`![[filename]]`)로 치환해서 반환. push 시 uploadEmbeddedImages가 하는 변환의 역방향.
+ */
+async function localizeEmbeddedImagesForPull(app: App, blog: BlogConfig, body: string, referenceFilePath: string): Promise<string> {
+	let result = body;
+	const matches = [...body.matchAll(SERVER_UPLOAD_MD_IMAGE_RE)];
+	const seen = new Set<string>();
+	for (const m of matches) {
+		const full = m[0];
+		const url = m[2];
+		if (!url || seen.has(full)) continue;
+		seen.add(full);
+		const file = await downloadServerImage(app, blog, url, referenceFilePath);
+		if (!file) continue;
+		result = result.split(full).join(`![[${file.name}]]`);
+	}
+	return result;
+}
+
 export function checkpointKey(blogId: string): string {
 	return `${CHECKPOINT_PREFIX}${blogId}`;
 }
@@ -353,18 +419,22 @@ function parseJsonField(value: unknown, fallback: unknown[] = []): unknown[] {
 	return fallback;
 }
 
-function docToFileContent(doc: PostDoc): string {
+// 서버 업로드 URL(/uploads/...)로 저장된 banner·본문 임베드 이미지를 vault로 다운로드해 위키링크로 되돌린 뒤
+// frontmatter + body를 조립. referenceFilePath는 Obsidian의 첨부파일 경로 설정 기준점(대상 노트 경로)으로 씀.
+async function docToFileContent(app: App, blog: BlogConfig, doc: PostDoc, referenceFilePath: string): Promise<string> {
 	const tags = parseJsonField(doc.tags) as string[];
 	const lines = ['---'];
 	lines.push(`title: "${doc.title.replace(/"/g, '\\"')}"`);
 	if (tags.length > 0) lines.push(`tags: [${tags.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ')}]`);
 	if (doc.published) lines.push('published: true');
-	if (doc.banner) lines.push(`banner: "${doc.banner.replace(/"/g, '\\"')}"`);
+	const localBanner = await localizeBannerForPull(app, blog, doc.banner, referenceFilePath);
+	if (localBanner) lines.push(`banner: "${localBanner.replace(/"/g, '\\"')}"`);
 	if (doc.banner_url) lines.push(`banner-url: "${doc.banner_url.replace(/"/g, '\\"')}"`);
 	if (doc.description) lines.push(`description: "${doc.description.replace(/"/g, '\\"')}"`);
 	if (doc.html_mode) lines.push('html_mode: true');
 	lines.push(`created_at: ${doc.created_at}`);
-	lines.push('---', '', doc.body_md);
+	const localBody = doc.html_mode ? doc.body_md : await localizeEmbeddedImagesForPull(app, blog, doc.body_md, referenceFilePath);
+	lines.push('---', '', localBody);
 	return lines.join('\n');
 }
 
@@ -449,7 +519,7 @@ async function applyPulledDocs(
 		if (serverMtime <= file.stat.mtime) continue;
 
 		onApply(filePath);
-		await app.vault.modify(file, docToFileContent(doc));
+		await app.vault.modify(file, await docToFileContent(app, blog, doc, filePath));
 	}
 }
 
@@ -522,7 +592,7 @@ export async function pullBlog(
 			const serverMtime = new Date(doc.updated_at).getTime();
 			if (!isOwnEcho && serverMtime > existing.stat.mtime) {
 				onApply(filePath);
-				await app.vault.modify(existing, docToFileContent(doc));
+				await app.vault.modify(existing, await docToFileContent(app, blog, doc, existing.path));
 				updated++;
 				const entry = t(locale, 'pullUpdated', { slug: doc.slug });
 				log.push(entry);
@@ -540,7 +610,7 @@ export async function pullBlog(
 				await app.vault.createFolder(dir);
 			}
 			onApply(filePath);
-			const newFile = await app.vault.create(filePath, docToFileContent(doc));
+			const newFile = await app.vault.create(filePath, await docToFileContent(app, blog, doc, filePath));
 			localBySlug.set(doc.slug, newFile);
 			created++;
 			const entry = t(locale, 'pullCreated', { slug: doc.slug });
