@@ -560,7 +560,9 @@ export async function pullBlog(
 	onApply: (path: string) => void,
 	onProgress?: (msg: string) => void,
 	locale: Locale = 'ko',
+	options?: { force?: boolean },
 ): Promise<PullResult> {
+	const force = options?.force ?? false;
 	onProgress?.(t(locale, 'pullFetchingList'));
 	const result = await callSyncApi(blog, [], null);
 
@@ -612,7 +614,7 @@ export async function pullBlog(
 		if (existing) {
 			const isOwnEcho = lastLivePushedAt.get(`${blog.id}:${existing.path}`) === doc.updated_at;
 			const serverMtime = new Date(doc.updated_at).getTime();
-			if (!isOwnEcho && serverMtime > existing.stat.mtime) {
+			if (!isOwnEcho && (force || serverMtime > existing.stat.mtime)) {
 				onApply(filePath);
 				await app.vault.modify(existing, await docToFileContent(app, blog, doc, existing.path));
 				updated++;

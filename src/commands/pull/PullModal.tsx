@@ -15,9 +15,11 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 		private blogs: BlogConfig[],
 		private onApply: (path: string) => void,
 		private locale: Locale = 'ko',
+		/** true면 로컬이 서버보다 최신이어도 무조건 덮어씀 (banner 링크 손상 등 기존 파일 복구용). */
+		private force = false,
 	) {
 		super(app);
-		this.setPlaceholder(t(locale, 'pullModalPlaceholder'));
+		this.setPlaceholder(t(locale, force ? 'forcePullModalPlaceholder' : 'pullModalPlaceholder'));
 	}
 
 	getItems(): BlogOption[] {
@@ -26,7 +28,7 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 			label: `${blog.rootFolder || 'Untitled'}  ${blog.link}`,
 		}));
 		if (this.blogs.length > 1) {
-			items.push({ blog: null, label: t(this.locale, 'pullModalAllBlogs') });
+			items.push({ blog: null, label: t(this.locale, this.force ? 'forcePullModalAllBlogs' : 'pullModalAllBlogs') });
 		}
 		return items;
 	}
@@ -61,6 +63,7 @@ export class PullModal extends FuzzySuggestModal<BlogOption> {
 					debugLog(msg);
 				},
 				this.locale,
+				{ force: this.force },
 			);
 
 			notice.hide();

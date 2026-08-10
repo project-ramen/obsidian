@@ -105,6 +105,25 @@ export default class RamenPlugin extends Plugin {
 			},
 		});
 
+		// 로컬이 서버보다 최신으로 판단되면 일반 pull은 건드리지 않는 파일도 무조건 덮어씀.
+		// banner/임베드 이미지 링크가 과거 버전에서 이미 /uploads/... URL로 오염된 기존 파일을 복구하는 용도.
+		this.addCommand({
+			id: 'force-pull-posts',
+			name: t(this.settings.language, 'cmdForcePullPosts'),
+			callback: () => {
+				const blogs = this.settings.blogs.filter(b => b.link && b.password);
+				if (!blogs.length) return;
+				new Notice(t(this.settings.language, 'forcePullWarning'), 8000);
+				new PullModal(
+					this.app,
+					blogs,
+					(path) => this._pullingPaths.add(path),
+					this.settings.language,
+					true,
+				).open();
+			},
+		});
+
 		this.addCommand({
 			id: 'check-for-updates',
 			name: t(this.settings.language, 'cmdCheckForUpdates'),

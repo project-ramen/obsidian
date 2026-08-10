@@ -6,6 +6,7 @@ const ko = {
 	cmdSyncPosts: '블로그에 포스트 동기화',
 	cmdReconnectBlog: '블로그 재연결',
 	cmdPullPosts: '블로그에서 포스트 가져오기',
+	cmdForcePullPosts: '블로그에서 강제로 가져오기 (로컬 덮어쓰기)',
 	cmdCheckForUpdates: '업데이트 확인',
 
 	updateCheckFailed: '업데이트 확인 실패 (네트워크 오류 또는 릴리즈 없음)',
@@ -58,6 +59,10 @@ const ko = {
 	pullDeleted: '[삭제] {slug} (.trashbin/ 폴더로 이동)',
 	pullSummary: '완료 — +{created} 생성 / ~{updated} 업데이트 / -{deleted} 삭제 / {skipped} 스킵',
 	pullFailed: '[{name}] Pull 실패: {e}',
+
+	forcePullModalPlaceholder: '강제로 가져올 블로그 선택… (로컬 파일이 서버 내용으로 덮어써집니다)',
+	forcePullModalAllBlogs: '모든 블로그에서 강제로 가져오기',
+	forcePullWarning: '⚠️ 로컬이 서버보다 최신이어도 무조건 덮어씁니다. 최근에 로컬에서만 수정한 내용이 있다면 먼저 push하세요.',
 
 	reconnectModalPlaceholder: '재연결할 블로그 선택…',
 	reconnectModalAllBlogs: '모든 블로그 재연결',
@@ -161,6 +166,7 @@ const en: Record<TranslationKey, string> = {
 	cmdSyncPosts: 'Sync posts to blog',
 	cmdReconnectBlog: 'Reconnect to blog',
 	cmdPullPosts: 'Pull posts from blog',
+	cmdForcePullPosts: 'Force pull from blog (overwrite local)',
 	cmdCheckForUpdates: 'Check for updates',
 
 	updateCheckFailed: 'Failed to check for updates (network error or no release found)',
@@ -213,6 +219,10 @@ const en: Record<TranslationKey, string> = {
 	pullDeleted: '[deleted] {slug} (moved to .trashbin/ folder)',
 	pullSummary: 'Done — +{created} created / ~{updated} updated / -{deleted} deleted / {skipped} skipped',
 	pullFailed: '[{name}] Pull failed: {e}',
+
+	forcePullModalPlaceholder: 'Select a blog to force pull… (local files will be overwritten with server content)',
+	forcePullModalAllBlogs: 'Force pull all blogs',
+	forcePullWarning: '⚠️ This overwrites local files even if they are newer than the server. Push first if you have local-only changes.',
 
 	reconnectModalPlaceholder: 'Select a blog to reconnect…',
 	reconnectModalAllBlogs: 'Reconnect all blogs',
