@@ -4,6 +4,7 @@ import { IconDropdown, SettingGroup, SettingRow } from "../components";
 import { t, Locale } from "../../i18n";
 import RamenPlugin from "../../main";
 import { isNewerVersion } from "../../update-checker";
+import { ChangelogAccordion } from "./ChangelogAccordion";
 
 function UpdateRow({ plugin, locale }: { plugin: RamenPlugin; locale: Locale }) {
 	const current = plugin.manifest.version;
@@ -60,7 +61,7 @@ function UpdateRow({ plugin, locale }: { plugin: RamenPlugin; locale: Locale }) 
 	);
 }
 
-export function GeneralSection({ settings, save, plugin }: SectionProps & { plugin: RamenPlugin }) {
+export function GeneralSection({ settings, save, app, plugin }: SectionProps & { plugin: RamenPlugin }) {
 	const locale = settings.language;
 	return (
 		<div>
@@ -193,6 +194,10 @@ export function GeneralSection({ settings, save, plugin }: SectionProps & { plug
 					}
 				/>
 				<UpdateRow plugin={plugin} locale={locale} />
+			</SettingGroup>
+
+			<SettingGroup heading={t(locale, "settingsGroupChangelog")}>
+				<ChangelogAccordion app={app} locale={locale} />
 			</SettingGroup>
 		</div>
 	);

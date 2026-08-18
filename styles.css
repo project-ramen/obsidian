@@ -776,3 +776,62 @@
 	min-width: 0;
 	overflow: hidden;
 }
+
+/* 설정 > 일반 > 업데이트 내역 (버전별 아코디언, GitHub 릴리즈 노트) */
+.ramen-changelog {
+	display: flex;
+	flex-direction: column;
+}
+
+.ramen-changelog-item {
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.ramen-changelog-item:first-child {
+	border-top: none;
+}
+
+.ramen-changelog-header {
+	align-items: center;
+	background: none !important;
+	border: none;
+	box-shadow: none !important;
+	cursor: pointer;
+	display: flex;
+	gap: 8px;
+	padding: 8px 0;
+	width: 100%;
+}
+
+.ramen-changelog-caret {
+	color: var(--text-faint);
+	display: flex;
+	flex-shrink: 0;
+	transition: transform 0.15s ease-out;
+}
+
+.ramen-changelog-item.is-expanded .ramen-changelog-caret {
+	transform: rotate(90deg);
+}
+
+.ramen-changelog-version {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.ramen-changelog-date {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-left: auto;
+}
+
+.ramen-changelog-body {
+	padding: 0 0 12px 22px;
+}
+
+.ramen-changelog-status {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 4px 0;
+}

@@ -24,6 +24,10 @@ jobs:
             contents: write
         steps:
             - uses: actions/checkout@v4
+              with:
+                  # git log/describe로 이전 태그까지의 커밋 이력을 봐야 해서 전체 히스토리 필요
+                  # (기본 얕은 clone엔 태그 이력이 없음).
+                  fetch-depth: 0
             - name: Use Bun
               uses: oven-sh/setup-bun@v2
               with:
@@ -36,7 +40,15 @@ jobs:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   tag="${GITHUB_REF#refs/tags/}"
+                  # --generate-notes는 머지된 PR 기반이라(이 저장소는 main에 직접 push, PR 안 씀)
+                  # "Full Changelog" 링크 한 줄만 남고 내용이 비어서, 커밋 로그 기반으로 직접 만듦.
+                  prev_tag=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+                  if [ -n "$prev_tag" ]; then
+                    git log --pretty=format:"- %s" "${prev_tag}..${tag}" > notes.md
+                  else
+                    git log --pretty=format:"- %s" "${tag}" > notes.md
+                  fi
                   gh release create "$tag" \
                     --title "$tag" \
-                    --generate-notes \
+                    --notes-file notes.md \
                     main.js manifest.json styles.css

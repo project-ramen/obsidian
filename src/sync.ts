@@ -1,5 +1,6 @@
 import { App, Notice, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { BlogConfig } from './settings/types';
+import { unwrapHtmlModeBody, wrapHtmlModeBody } from './commands/html-editor/htmlDocParts';
 import { Locale, t } from './i18n';
 import { debugLog } from './logger';
 
@@ -243,6 +244,18 @@ async function resolveBannerImage(app: App, file: TFile, blog: BlogConfig, raw: 
 const downloadedImageCache = new Map<string, TFile>();
 const SERVER_UPLOAD_MD_IMAGE_RE = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
 
+/** dir 안에서 filename과 안 겹치는 경로를 찾음 — 겹치면 Obsidian 컨벤션대로 "이름 2.ext", "이름 3.ext" 순으로 증가. */
+function availablePathInFolder(app: App, dir: string, filename: string): string {
+	const dot = filename.lastIndexOf('.');
+	const base = dot > 0 ? filename.slice(0, dot) : filename;
+	const ext = dot > 0 ? filename.slice(dot) : '';
+	let candidate = normalizePath(`${dir}/${filename}`);
+	for (let i = 2; app.vault.getAbstractFileByPath(candidate); i++) {
+		candidate = normalizePath(`${dir}/${base} ${i}${ext}`);
+	}
+	return candidate;
+}
+
 /**
  * 서버의 /uploads/... 상대경로 이미지를 vault 첨부파일 폴더로 다운로드하고 로컬 TFile을 반환.
  * 이미 다운로드한 적 있으면 캐시된 파일을 재사용. 실패 시 null.
@@ -260,7 +273,7 @@ async function downloadServerImage(app: App, blog: BlogConfig, url: string, refe
 	const rawName = recallUploadedFilename(blog.id, url) ?? decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
 
 	// vault에 같은 이름의 파일이 이미 있으면(애초에 그 이미지를 push했던 로컬 원본이거나 이미 한 번 pull된 경우)
-	// 새로 받지 않고 그대로 재사용 — 안 하면 getAvailablePathForAttachment가 "파일명 1.png" 식으로 매번 중복 생성함.
+	// 새로 받지 않고 그대로 재사용 — 안 하면 availablePathInFolder가 "파일명 2.png" 식으로 매번 중복 생성함.
 	const existing = app.metadataCache.getFirstLinkpathDest(rawName, referenceFilePath);
 	if (existing instanceof TFile) {
 		debugLog(`[ramen pull] vault에 이미 있는 이미지 재사용 (다운로드 스킵): ${rawName} → ${existing.path}`);
@@ -274,8 +287,16 @@ async function downloadServerImage(app: App, blog: BlogConfig, url: string, refe
 			console.warn(`[ramen pull] 이미지 다운로드 실패 (${res.status}): ${absoluteUrl}`);
 			return null;
 		}
-		const availablePath = await app.fileManager.getAvailablePathForAttachment(rawName, referenceFilePath);
-		const file = await app.vault.createBinary(normalizePath(availablePath), res.arrayBuffer);
+		// app.fileManager.getAvailablePathForAttachment는 Obsidian 전역 설정("파일 및 링크 > 새 첨부파일
+		// 기본 위치")을 그대로 따라서, 그 설정이 "vault 폴더"(기본값)면 블로그 rootFolder와 무관하게 무조건
+		// vault 루트에 저장돼버림 — 블로그별 attachmentFolder 설정을 무시하는 버그. 대신 rootFolder/
+		// attachmentFolder 아래 경로를 우리가 직접 정하고, 중복 파일명만 자체적으로 회피.
+		const attachDir = normalizePath(`${blog.rootFolder.replace(/\/+$/, '')}/${blog.attachmentFolder || 'attachments'}`);
+		if (!app.vault.getAbstractFileByPath(attachDir)) {
+			await app.vault.createFolder(attachDir);
+		}
+		const availablePath = availablePathInFolder(app, attachDir, rawName);
+		const file = await app.vault.createBinary(availablePath, res.arrayBuffer);
 		downloadedImageCache.set(cacheKey, file);
 		debugLog(`[ramen pull] 이미지 다운로드 성공: ${absoluteUrl} → ${file.path}`);
 		return file;
@@ -403,15 +424,18 @@ export async function fileToPostDoc(app: App, file: TFile, blog: BlogConfig, con
 	const slug = slugFromPath(file.path, blog.rootFolder);
 	const category = categoryFromPath(file.path, blog.rootFolder);
 
-	const body_md = await uploadEmbeddedImages(app, file, blog, stripFrontmatter(content));
+	const html_mode = fm['html_mode'] === true || fm['html_mode'] === 1 ? 1 : 0;
+	// html_mode 노트는 로컬 파일에 코드펜스로 감싸 저장돼 있음(Obsidian 태그 오염 방지, htmlDocParts.ts
+	// 참고) — 서버로 보낼 body_md는 그 펜스를 벗긴 순수 raw HTML이어야 함.
+	const strippedContent = stripFrontmatter(content);
+	const bodyForUpload = html_mode ? unwrapHtmlModeBody(strippedContent) : strippedContent;
+	const body_md = await uploadEmbeddedImages(app, file, blog, bodyForUpload);
 
 	const rawBanner = typeof fm['banner'] === 'string' ? fm['banner'].trim() : '';
 	const banner = rawBanner ? await resolveBannerImage(app, file, blog, rawBanner) : null;
 
 	const rawBannerUrl = typeof fm['banner-url'] === 'string' ? fm['banner-url'].trim() : '';
 	const banner_url = rawBannerUrl || null;
-
-	const html_mode = fm['html_mode'] === true || fm['html_mode'] === 1 ? 1 : 0;
 
 	const rawTags: unknown = fm['tags'];
 	const tags = normalizeTagsValue(rawTags);
@@ -496,7 +520,7 @@ async function docToFileContent(app: App, blog: BlogConfig, doc: PostDoc, refere
 	if (doc.description) lines.push(`description: "${doc.description.replace(/"/g, '\\"')}"`);
 	if (doc.html_mode) lines.push('html_mode: true');
 	lines.push(`created_at: ${doc.created_at}`);
-	const localBody = doc.html_mode ? doc.body_md : await localizeEmbeddedImagesForPull(app, blog, doc.body_md, referenceFilePath);
+	const localBody = doc.html_mode ? wrapHtmlModeBody(doc.body_md) : await localizeEmbeddedImagesForPull(app, blog, doc.body_md, referenceFilePath);
 	lines.push('---', '', localBody);
 	return lines.join('\n');
 }

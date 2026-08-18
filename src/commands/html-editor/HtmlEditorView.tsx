@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { App, EventRef, FileView, Menu, MarkdownView, setIcon, SplitDirection, TFile, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
-import { HtmlDocParts, joinHtmlDoc, splitHtmlDoc } from './htmlDocParts';
+import { HtmlDocParts, joinHtmlDoc, splitHtmlDoc, unwrapHtmlModeBody, wrapHtmlModeBody } from './htmlDocParts';
 import { CodeEditor } from './CodeEditor';
 
 export const HTML_EDITOR_VIEW_TYPE = 'ramen-html-editor';
@@ -256,7 +256,7 @@ export class HtmlEditorView extends FileView {
 		const raw = await this.app.vault.read(this.file);
 		const fmMatch = raw.match(FRONTMATTER_RE);
 		const frontmatter = fmMatch ? fmMatch[0] : '';
-		const parts = splitHtmlDoc(raw.slice(frontmatter.length));
+		const parts = splitHtmlDoc(unwrapHtmlModeBody(raw.slice(frontmatter.length)));
 
 		this.root.render(
 			<HtmlEditorPanel
@@ -279,7 +279,7 @@ export class HtmlEditorView extends FileView {
 
 	private async persist(frontmatter: string, parts: HtmlDocParts): Promise<void> {
 		if (!this.file) return;
-		await this.app.vault.modify(this.file, `${frontmatter}${joinHtmlDoc(parts)}`);
+		await this.app.vault.modify(this.file, `${frontmatter}${wrapHtmlModeBody(joinHtmlDoc(parts))}`);
 	}
 }
 

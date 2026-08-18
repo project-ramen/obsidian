@@ -142,6 +142,12 @@ const ko = {
 	settingsUpdateInstall: '업데이트 설치',
 	settingsUpdateInstalling: '설치 중…',
 
+	settingsGroupChangelog: '업데이트 내역',
+	settingsChangelogLoading: '불러오는 중…',
+	settingsChangelogFailed: '업데이트 내역을 불러오지 못했습니다',
+	settingsChangelogEmpty: '아직 릴리즈가 없습니다',
+	settingsChangelogNoNotes: '(이 버전에 대한 노트가 없습니다)',
+
 	settingsThemeColorName: '테마 색상',
 	settingsThemeColorDesc: 'Obsidian 설정을 따르거나 앱 테마를 직접 지정',
 	settingsThemeFollowObsidian: 'Obsidian 설정 따름',
@@ -321,6 +327,12 @@ const en: Record<TranslationKey, string> = {
 	settingsUpdateChecking: 'Checking…',
 	settingsUpdateInstall: 'Install update',
 	settingsUpdateInstalling: 'Installing…',
+
+	settingsGroupChangelog: 'Changelog',
+	settingsChangelogLoading: 'Loading…',
+	settingsChangelogFailed: 'Failed to load changelog',
+	settingsChangelogEmpty: 'No releases yet',
+	settingsChangelogNoNotes: '(No notes for this version)',
 
 	settingsThemeColorName: 'Theme color',
 	settingsThemeColorDesc: "Override the app theme or follow Obsidian's setting",

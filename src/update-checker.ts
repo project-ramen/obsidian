@@ -23,6 +23,40 @@ export interface ReleaseInfo {
 	assets: ReleaseAsset[];
 }
 
+export interface ReleaseHistoryEntry {
+	version: string;
+	/** GitHub release 본문(마크다운) — release.yml이 `gh release create --generate-notes`로 자동 생성. */
+	body: string;
+	publishedAt: string;
+}
+
+interface GitHubReleaseListItem {
+	tag_name?: string;
+	body?: string | null;
+	published_at?: string | null;
+}
+
+/** GitHub 릴리즈 내역(버전 + 노트)을 최신순으로 가져온다. 실패 시 null. */
+export async function fetchReleaseHistory(limit = 15): Promise<ReleaseHistoryEntry[] | null> {
+	const res = await requestUrl({
+		url: `https://api.github.com/repos/${REPO}/releases?per_page=${limit}`,
+		method: 'GET',
+		throw: false,
+	});
+	if (res.status < 200 || res.status >= 300) return null;
+
+	const data = res.json as GitHubReleaseListItem[];
+	if (!Array.isArray(data)) return null;
+
+	return data
+		.filter((r) => r.tag_name)
+		.map((r) => ({
+			version: (r.tag_name ?? '').replace(/^v/, ''),
+			body: r.body ?? '',
+			publishedAt: r.published_at ?? '',
+		}));
+}
+
 /** GitHub의 최신 릴리즈 정보를 가져온다. 실패(네트워크 오류, 릴리즈 없음 등) 시 null. */
 export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
 	const res = await requestUrl({
