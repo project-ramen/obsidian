@@ -3,6 +3,11 @@ import { App, TFile, normalizePath } from 'obsidian';
 const WIKILINK_RE = /^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
 const MD_IMAGE_RE = /^!\[[^\]]*\]\(([^)\s]+)\)$/;
 
+/** raw 값이 로컬 vault 이미지를 가리키는 위키링크/표준 md 이미지면 그 링크 경로 부분만 뽑아냄. */
+function extractLinkPath(raw: string): string | null {
+	return raw.match(WIKILINK_RE)?.[1] ?? raw.match(MD_IMAGE_RE)?.[1] ?? null;
+}
+
 /**
  * frontmatter의 banner 값(위키링크 `[[img.png]]`/`![[img.png]]`, 표준 `![alt](경로)`, 이미 서버에
  * 업로드된 외부 URL/절대경로)을 <img src>로 바로 쓸 수 있는 값으로 변환. resolveBannerImage(sync.ts)와
@@ -13,10 +18,22 @@ export function resolveBannerSrc(app: App, sourcePath: string, raw: string | und
 	const trimmed = raw?.trim();
 	if (!trimmed) return null;
 	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith('/')) return trimmed;
-	const linkPath = trimmed.match(WIKILINK_RE)?.[1] ?? trimmed.match(MD_IMAGE_RE)?.[1];
+	const linkPath = extractLinkPath(trimmed);
 	if (!linkPath) return null;
 	const resolved = app.metadataCache.getFirstLinkpathDest(decodeURIComponent(linkPath), sourcePath);
 	return resolved instanceof TFile ? app.vault.getResourcePath(resolved) : null;
+}
+
+/** frontmatter의 banner 값이 가리키는 실제 vault 파일. 외부 URL이거나 못 찾으면 null —
+ *  "배너 삭제" 시 실제 파일까지 지울지 물어볼 때 지울 대상이 있는지 판단하는 용도. */
+export function resolveBannerFile(app: App, sourcePath: string, raw: string | undefined | null): TFile | null {
+	const trimmed = raw?.trim();
+	if (!trimmed) return null;
+	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || trimmed.startsWith('/')) return null;
+	const linkPath = extractLinkPath(trimmed);
+	if (!linkPath) return null;
+	const resolved = app.metadataCache.getFirstLinkpathDest(decodeURIComponent(linkPath), sourcePath);
+	return resolved instanceof TFile ? resolved : null;
 }
 
 /**

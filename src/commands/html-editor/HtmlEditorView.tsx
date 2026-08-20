@@ -3,7 +3,8 @@ import { App, EventRef, FileView, Menu, MarkdownView, parseYaml, setIcon, SplitD
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
 import { HtmlDocParts, joinHtmlDoc, splitHtmlDoc, unwrapHtmlModeBody, wrapHtmlModeBody } from './htmlDocParts';
-import { attachBannerImage, resolveBannerSrc } from './bannerMeta';
+import { attachBannerImage, resolveBannerFile, resolveBannerSrc } from './bannerMeta';
+import { BannerRemoveModal } from './BannerRemoveModal';
 import { CodeEditor } from './CodeEditor';
 import { normalizeTagsValue } from '../../sync';
 
@@ -153,6 +154,30 @@ function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbe
 	// frontmatter title이 비어있으면 sync.ts도 파일명을 제목으로 씀 — placeholder로 그 기본값을 보여줌.
 	const fileBasename = sourcePath.split('/').pop()?.replace(/\.md$/, '') ?? '';
 
+	const handleBannerRemove = () => {
+		const bannerFile = resolveBannerFile(app, sourcePath, metaState.banner);
+		// 외부 URL(이미 서버에 업로드된 값 등)이라 지울 로컬 파일이 없으면 바로 참조만 제거.
+		if (!bannerFile) {
+			updateMeta({ banner: '', bannerUrl: '' }, true);
+			return;
+		}
+		new BannerRemoveModal(
+			app,
+			{
+				title: t(locale, 'htmlEditorBannerRemoveTitle'),
+				message: t(locale, 'htmlEditorBannerRemoveMessage', { name: bannerFile.name }),
+				deleteFileLabel: t(locale, 'htmlEditorBannerRemoveDeleteFile'),
+				unlinkOnlyLabel: t(locale, 'htmlEditorBannerRemoveUnlinkOnly'),
+				cancelLabel: t(locale, 'cancel'),
+			},
+			(choice) => {
+				if (!choice) return;
+				if (choice === 'delete-file') void app.fileManager.trashFile(bannerFile);
+				updateMeta({ banner: '', bannerUrl: '' }, true);
+			},
+		).open();
+	};
+
 	// Preview는 탭 바가 아니라 뷰 헤더의 아이콘으로 접근 — 여기 탭 바에는 HTML/CSS/JS만.
 	const tabs: { key: Tab; label: string }[] = [
 		{ key: 'html', label: 'HTML' },
@@ -197,7 +222,7 @@ function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbe
 								<button
 									type="button"
 									className="ramen-html-editor-meta-button is-danger"
-									onClick={() => updateMeta({ banner: '', bannerUrl: '' }, true)}
+									onClick={handleBannerRemove}
 								>
 									{t(locale, 'htmlEditorBannerClear')}
 								</button>
