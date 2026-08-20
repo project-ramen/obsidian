@@ -319,6 +319,25 @@ function availablePathInFolder(app: App, dir: string, filename: string): string 
  * 서버의 /uploads/... 상대경로 이미지를 vault 첨부파일 폴더로 다운로드하고 로컬 TFile을 반환.
  * 이미 다운로드한 적 있으면 캐시된 파일을 재사용. 실패 시 null.
  */
+/**
+ * url이 서버에서 리사이즈/webp 변환된 최적화 파일이면, 그 원본(`GET .../original`)의 URL을 찾아 반환.
+ * 원본이 따로 없으면(gif/svg처럼 애초에 최적화 대상이 아니었거나, 오래된 업로드라 원본이 안 남아있는
+ * 경우) null — 호출부가 url 자체를 그대로 쓰면 됨. 실패해도 조용히 null(다운로드 자체를 막지 않음).
+ */
+async function resolveOriginalUploadUrl(blog: BlogConfig, url: string): Promise<string | null> {
+	const filename = url.split('/').pop();
+	if (!filename) return null;
+	try {
+		const res = await requestUrl({ url: `${blog.link.replace(/\/+$/, '')}/api/uploads/${filename}/original`, method: 'GET', throw: false });
+		if (res.status !== 200) return null;
+		const originalUrl = (res.json as { originalUrl?: string })?.originalUrl;
+		return typeof originalUrl === 'string' ? originalUrl : null;
+	} catch (e) {
+		debugLog(`[ramen pull] 원본 조회 실패 (무해함, 최적화된 파일 그대로 받음): ${url}`, e);
+		return null;
+	}
+}
+
 async function downloadServerImage(app: App, blog: BlogConfig, url: string, referenceFilePath: string): Promise<TFile | null> {
 	const cacheKey = `${blog.id}:${url}`;
 	const cached = downloadedImageCache.get(cacheKey);
@@ -327,8 +346,13 @@ async function downloadServerImage(app: App, blog: BlogConfig, url: string, refe
 		return cached;
 	}
 
-	const absoluteUrl = /^https?:\/\//.test(url) ? url : `${blog.link.replace(/\/+$/, '')}${url}`;
-	// 업로드 당시 기억해둔 원본 파일명이 있으면 그걸로 복원, 없으면(다른 경로로 업로드된 경우 등) URL에서 유추
+	// 서버가 리사이즈/webp 변환한 파일이면 원본이 따로 있는지 먼저 확인 — 있으면 그걸 받아서
+	// vault엔 화질 손실 없는 원본이 들어가게(다른 기기에서 pull해도 처음 업로드했던 원본 그대로).
+	const originalUrl = await resolveOriginalUploadUrl(blog, url);
+	const downloadUrl = originalUrl ?? url;
+	const absoluteUrl = /^https?:\/\//.test(downloadUrl) ? downloadUrl : `${blog.link.replace(/\/+$/, '')}${downloadUrl}`;
+	// 업로드 당시 기억해둔 원본 파일명이 있으면 그걸로 복원, 없으면(다른 기기에서 pull하는 경우 등) 실제
+	// 받아오는 파일(downloadUrl — 원본이 있으면 원본, 없으면 최적화 파일)의 확장자로 유추.
 	const rawName = recallUploadedFilename(blog.id, url) ?? decodeURIComponent(absoluteUrl.split('/').pop() || `image-${Date.now()}`);
 
 	// vault에 같은 이름의 파일이 이미 있으면(애초에 그 이미지를 push했던 로컬 원본이거나 이미 한 번 pull된 경우)
