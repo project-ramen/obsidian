@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { App, EventRef, FileView, Menu, MarkdownView, parseYaml, setIcon, SplitDirection, TFile, WorkspaceLeaf } from 'obsidian';
+import { App, EventRef, FileView, Menu, MarkdownView, Notice, parseYaml, setIcon, SplitDirection, TFile, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
 import { HtmlDocParts, joinHtmlDoc, splitHtmlDoc, unwrapHtmlModeBody, wrapHtmlModeBody } from './htmlDocParts';
 import { attachBannerImage, resolveBannerFile, resolveBannerSrc } from './bannerMeta';
 import { BannerRemoveModal } from './BannerRemoveModal';
 import { CodeEditor } from './CodeEditor';
-import { normalizeTagsValue } from '../../sync';
+import { blogsForFilePath, deleteServerUpload, forceReuploadImageFile, normalizeTagsValue, pushFileLive } from '../../sync';
+import { BlogConfig } from '../../settings/types';
 
 export const HTML_EDITOR_VIEW_TYPE = 'ramen-html-editor';
 
@@ -76,6 +77,9 @@ const EMPTY_META: HtmlEditorMeta = { title: '', banner: '', bannerUrl: '', descr
 interface PanelProps {
 	app: App;
 	sourcePath: string;
+	/** 이 파일이 속한(연결된) 블로그 — "무시하고 다시 업로드" 버튼이 서버에 직접 요청 보낼 대상.
+	 *  연결된 블로그가 없으면(html_mode 노트가 아직 어떤 블로그 rootFolder에도 없는 등) null. */
+	blog: BlogConfig | null;
 	initial: HtmlDocParts;
 	meta: HtmlEditorMeta;
 	locale: Locale;
@@ -87,7 +91,7 @@ interface PanelProps {
 	onMetaChange: (patch: Partial<HtmlEditorMeta>) => void;
 }
 
-function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbers, tab, onTabChange, onChange, onMetaChange }: PanelProps) {
+function HtmlEditorPanel({ app, sourcePath, blog, initial, meta, locale, showLineNumbers, tab, onTabChange, onChange, onMetaChange }: PanelProps) {
 	const [parts, setParts] = useState<HtmlDocParts>(initial);
 	const debounceRef = useRef<number | null>(null);
 	const [metaState, setMetaState] = useState<HtmlEditorMeta>(meta);
@@ -97,6 +101,7 @@ function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbe
 	// 저장 안 되고 유실됨 — 그래서 터질 때까지의 patch를 여기 누적해서 한 번에 onMetaChange로 보냄.
 	const pendingMetaPatchRef = useRef<Partial<HtmlEditorMeta>>({});
 	const [bannerUploading, setBannerUploading] = useState(false);
+	const [forceUploading, setForceUploading] = useState(false);
 	const bannerFileInputRef = useRef<HTMLInputElement>(null);
 
 	// 다른 파일로 전환되거나(setFile) 외부(pull 등)에서 파일이 바뀌면 편집 중인 내용을 새로 반영
@@ -150,7 +155,36 @@ function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbe
 		}
 	};
 
+	// 로컬 hash 캐시 때문에 같은 파일을 다시 push해도 서버가 재처리 안 하는 경우(예: 서버 업로드
+	// 파이프라인이 새로 바뀐 뒤, 예전에 이미 캐시된 배너를 다시 최적화시키고 싶을 때) 강제로 재업로드.
+	// 순서가 중요함: 1) 새 파일 업로드(캐시 갱신) 2) 이 노트를 즉시 push해서 서버 DB의 banner가
+	// 실제로 새 URL을 가리키게 함 3) 그 다음에야 예전 파일을 지움 — 순서를 안 지키고 먼저 지워버리면
+	// DB가 아직 예전 URL을 가리키는 동안 그 파일이 사라져서 라이브 배너가 잠깐 깨짐.
+	const handleForceReupload = async () => {
+		const bannerFile = resolveBannerFile(app, sourcePath, metaState.banner);
+		const noteFile = app.vault.getAbstractFileByPath(sourcePath);
+		if (!bannerFile || !blog || !(noteFile instanceof TFile)) return;
+		setForceUploading(true);
+		try {
+			const result = await forceReuploadImageFile(app, blog, bannerFile);
+			if (!result) {
+				new Notice(t(locale, 'htmlEditorBannerForceReuploadFailed'));
+				return;
+			}
+			await pushFileLive(app, blog, noteFile, locale);
+			if (result.previousUrl) void deleteServerUpload(blog, result.previousUrl);
+			new Notice(t(locale, 'htmlEditorBannerForceReuploadDone'));
+		} catch {
+			new Notice(t(locale, 'htmlEditorBannerForceReuploadFailed'));
+		} finally {
+			setForceUploading(false);
+		}
+	};
+
 	const bannerSrc = resolveBannerSrc(app, sourcePath, metaState.banner);
+	// 로컬 vault 이미지고 연결된 블로그가 있어야 "무시하고 다시 업로드"가 의미 있음
+	// (외부 URL이면 재업로드할 로컬 원본이 없고, 블로그가 없으면 어디로 보낼지 알 수 없음).
+	const canForceReupload = !!(blog && resolveBannerFile(app, sourcePath, metaState.banner));
 	// frontmatter title이 비어있으면 sync.ts도 파일명을 제목으로 씀 — placeholder로 그 기본값을 보여줌.
 	const fileBasename = sourcePath.split('/').pop()?.replace(/\.md$/, '') ?? '';
 
@@ -218,6 +252,17 @@ function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbe
 							>
 								{bannerUploading ? t(locale, 'htmlEditorBannerUploading') : metaState.banner ? t(locale, 'htmlEditorBannerChange') : t(locale, 'htmlEditorBannerUpload')}
 							</button>
+							{canForceReupload && (
+								<button
+									type="button"
+									className="ramen-html-editor-meta-button"
+									disabled={forceUploading}
+									onClick={() => void handleForceReupload()}
+									title={t(locale, 'htmlEditorBannerForceReuploadHint')}
+								>
+									{forceUploading ? t(locale, 'htmlEditorBannerUploading') : t(locale, 'htmlEditorBannerForceReupload')}
+								</button>
+							)}
 							{metaState.banner && (
 								<button
 									type="button"
@@ -337,13 +382,17 @@ export class HtmlEditorView extends FileView {
 	private previewActionEl: HTMLElement | null = null;
 	/** onLoadFile이 "다른 파일로 전환"인지 판단하기 위한 직전 파일 경로. */
 	private loadedFilePath: string | null = null;
+	/** "무시하고 다시 업로드" 버튼용 — 이 파일이 속한 블로그(연결 정보)를 알아야 서버에 직접 업로드/삭제
+	 *  요청을 보낼 수 있음. 콜백으로 받아서 항상 설정 창에서 방금 바뀐 최신 블로그 목록을 봄. */
+	private readonly getBlogs: () => BlogConfig[];
 
-	constructor(leaf: WorkspaceLeaf, locale: Locale, defaultTab: Tab) {
+	constructor(leaf: WorkspaceLeaf, locale: Locale, defaultTab: Tab, getBlogs: () => BlogConfig[]) {
 		super(leaf);
 		this.locale = locale;
 		this.defaultTab = defaultTab;
 		this.tab = defaultTab;
 		this.lastCodeTab = defaultTab === 'preview' ? 'html' : defaultTab;
+		this.getBlogs = getBlogs;
 	}
 
 	getViewType(): string {
@@ -466,12 +515,14 @@ export class HtmlEditorView extends FileView {
 		const frontmatter = fmMatch ? fmMatch[0] : '';
 		const parts = splitHtmlDoc(unwrapHtmlModeBody(raw.slice(frontmatter.length)));
 		const meta = parseFrontmatterMeta(frontmatter);
+		const blog = blogsForFilePath(this.getBlogs(), this.file.path)[0] ?? null;
 
 		this.root.render(
 			<HtmlEditorPanel
 				key={this.file.path}
 				app={this.app}
 				sourcePath={this.file.path}
+				blog={blog}
 				initial={parts}
 				meta={meta}
 				locale={this.locale}

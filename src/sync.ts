@@ -107,19 +107,8 @@ function buildMultipartBody(fieldName: string, filename: string, mime: string, d
 	return { body: body.buffer, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Promise<string | null> {
-	const data = await app.vault.readBinary(imageFile);
-	const hash = await hashArrayBuffer(data);
-	const cacheKey = `${blog.id}:${hash}`;
-
-	// 내용이 완전히 같은 이미지는 파일 경로·이름·mtime이 달라도(예: 사본, pull 시 다시 받은 동일 이미지) 재업로드하지 않음
-	const cached = uploadedImageCache.get(cacheKey) ?? recallUploadedUrlByHash(blog.id, hash);
-	if (cached) {
-		debugLog(`[ramen] 이미지 업로드 스킵 (동일 내용 이미 업로드됨): ${imageFile.path} → ${cached}`);
-		uploadedImageCache.set(cacheKey, cached);
-		return cached;
-	}
-
+/** 실제 HTTP 업로드 1회 수행(캐시 체크 없이). 성공하면 서버 URL, 실패하면 null. */
+async function performImageUpload(blog: BlogConfig, imageFile: TFile, data: ArrayBuffer): Promise<string | null> {
 	const target = `${blog.link}/api/uploads`;
 	debugLog(`[ramen] 이미지 업로드 시작: ${imageFile.path} (${imageFile.stat.size} bytes) → ${target}`);
 	try {
@@ -143,14 +132,83 @@ async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Pr
 			return null;
 		}
 		debugLog(`[ramen] 이미지 업로드 성공: ${imageFile.path} → ${url}`);
-		uploadedImageCache.set(cacheKey, url);
-		rememberUploadedUrlByHash(blog.id, hash, url);
-		rememberUploadedFilename(blog.id, url, imageFile.name);
 		return url;
 	} catch (e) {
 		console.warn(`[ramen] 이미지 업로드 실패: ${imageFile.path}`, e);
 		return null;
 	}
+}
+
+async function uploadImageFile(app: App, blog: BlogConfig, imageFile: TFile): Promise<string | null> {
+	const data = await app.vault.readBinary(imageFile);
+	const hash = await hashArrayBuffer(data);
+	const cacheKey = `${blog.id}:${hash}`;
+
+	// 내용이 완전히 같은 이미지는 파일 경로·이름·mtime이 달라도(예: 사본, pull 시 다시 받은 동일 이미지) 재업로드하지 않음
+	const cached = uploadedImageCache.get(cacheKey) ?? recallUploadedUrlByHash(blog.id, hash);
+	if (cached) {
+		debugLog(`[ramen] 이미지 업로드 스킵 (동일 내용 이미 업로드됨): ${imageFile.path} → ${cached}`);
+		uploadedImageCache.set(cacheKey, cached);
+		return cached;
+	}
+
+	const url = await performImageUpload(blog, imageFile, data);
+	if (!url) return null;
+	uploadedImageCache.set(cacheKey, url);
+	rememberUploadedUrlByHash(blog.id, hash, url);
+	rememberUploadedFilename(blog.id, url, imageFile.name);
+	return url;
+}
+
+/**
+ * uploadImageFile과 달리 내용-해시 캐시를 무시하고 무조건 새로 업로드 — 서버가 재처리(예: 리사이즈/
+ * 포맷 변환)를 새로 하도록 강제하고 싶을 때 씀(예: 서버 업로드 파이프라인이 바뀐 뒤 예전에 이미
+ * 캐시된 이미지를 다시 최적화시키고 싶은 경우). 캐시에 남아있던 "이전 URL"을 같이 반환하니, 호출부에서
+ * 그 파일이 이제 이 노트에서 안 쓰인다고 판단되면 deleteServerUpload로 정리할 수 있음.
+ */
+export async function forceReuploadImageFile(
+	app: App,
+	blog: BlogConfig,
+	imageFile: TFile,
+): Promise<{ url: string; previousUrl: string | null } | null> {
+	const data = await app.vault.readBinary(imageFile);
+	const hash = await hashArrayBuffer(data);
+	const cacheKey = `${blog.id}:${hash}`;
+	const previousUrl = uploadedImageCache.get(cacheKey) ?? recallUploadedUrlByHash(blog.id, hash) ?? null;
+
+	const url = await performImageUpload(blog, imageFile, data);
+	if (!url) return null;
+	uploadedImageCache.set(cacheKey, url);
+	rememberUploadedUrlByHash(blog.id, hash, url);
+	rememberUploadedFilename(blog.id, url, imageFile.name);
+	return { url, previousUrl: previousUrl && previousUrl !== url ? previousUrl : null };
+}
+
+/** blog 서버에 업로드된 /uploads/... 파일을 지움 — force 재업로드로 예전 파일이 더 이상
+ *  안 쓰이게 됐을 때 정리하는 용도. 실패해도(이미 없거나 네트워크 오류) 조용히 무시. */
+export async function deleteServerUpload(blog: BlogConfig, url: string): Promise<void> {
+	if (!url.startsWith('/uploads/')) return;
+	const filename = url.slice('/uploads/'.length);
+	if (!filename || filename.includes('/')) return;
+	try {
+		await requestUrl({
+			url: `${blog.link}/api/uploads/${filename}`,
+			method: 'DELETE',
+			headers: { Authorization: `Bearer ${blog.password}` },
+			throw: false,
+		});
+	} catch (e) {
+		debugLog(`[ramen] 예전 업로드 파일 삭제 실패 (무해함): ${url}`, e);
+	}
+}
+
+/** filePath가 속한 블로그들(rootFolder 하위) — 연결(link+password) 안 된 블로그는 제외. */
+export function blogsForFilePath(blogs: BlogConfig[], filePath: string): BlogConfig[] {
+	return blogs.filter(b => {
+		const root = b.rootFolder.replace(/\/+$/, '');
+		if (!root || !filePath.startsWith(root + '/')) return false;
+		return !!(b.link && b.password);
+	});
 }
 
 /**

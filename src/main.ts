@@ -54,7 +54,7 @@ export default class RamenPlugin extends Plugin {
 
 		this.registerView(
 			HTML_EDITOR_VIEW_TYPE,
-			(leaf) => new HtmlEditorView(leaf, this.settings.language, this.settings.htmlEditorDefaultTab),
+			(leaf) => new HtmlEditorView(leaf, this.settings.language, this.settings.htmlEditorDefaultTab, () => this.settings.blogs),
 		);
 		this.registerView(CHANGELOG_VIEW_TYPE, (leaf) => new ChangelogView(leaf, this.settings.language));
 
