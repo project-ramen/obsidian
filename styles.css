@@ -283,6 +283,14 @@
 	color: var(--text-normal);
 }
 
+/* 범용 확인 모달(ConfirmModal) */
+.ramen-confirm-modal-buttons {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+	margin-top: 12px;
+}
+
 /* Insert image modal */
 .ramen-insert-image-modal {
 	width: 640px;
@@ -754,6 +762,113 @@
 	box-shadow: var(--shadow-s) !important;
 }
 
+/* 배너 이미지·설명(description) — 탭(HTML/CSS/JS/미리보기)과 무관하게 항상 맨 위에 표시.
+   frontmatter의 banner/banner-url/description을 여기서 직접 보고 고칠 수 있게 함. */
+.ramen-html-editor-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex-shrink: 0;
+	padding: 10px var(--file-margins, 0) 0;
+}
+
+.ramen-html-editor-meta-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.ramen-html-editor-meta-label {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.ramen-html-editor-meta-banner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 10px;
+}
+
+.ramen-html-editor-meta-banner-preview {
+	width: 96px;
+	height: 60px;
+	object-fit: cover;
+	border-radius: var(--radius-m, 8px);
+	background: var(--background-primary);
+	flex-shrink: 0;
+}
+
+.ramen-html-editor-meta-banner-empty {
+	width: 96px;
+	height: 60px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	flex-shrink: 0;
+}
+
+.ramen-html-editor-meta-banner-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ramen-html-editor-meta-button {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	padding: 4px 10px;
+	border-radius: var(--radius-m, 8px);
+}
+
+.ramen-html-editor-meta-button:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ramen-html-editor-meta-button:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.ramen-html-editor-meta-button.is-danger {
+	color: var(--text-error);
+	border-color: transparent;
+	background: transparent;
+}
+
+.ramen-html-editor-meta-button.is-danger:hover {
+	background: var(--background-modifier-error-hover, var(--background-modifier-hover));
+}
+
+.ramen-html-editor-hidden-input {
+	display: none;
+}
+
+.ramen-html-editor-meta-input,
+.ramen-html-editor-meta-description {
+	width: 100%;
+	font-size: var(--font-ui-smaller);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	padding: 5px 8px;
+}
+
+.ramen-html-editor-meta-description {
+	resize: none;
+	font-family: inherit;
+	min-height: 2.4em;
+}
+
 .ramen-html-editor-body {
 	flex: 1;
 	min-height: 0;
@@ -777,57 +892,55 @@
 	overflow: hidden;
 }
 
-/* 설정 > 일반 > 업데이트 내역 (버전별 아코디언, GitHub 릴리즈 노트) */
+/* 업데이트 내역 페이지(ChangelogView) — 설정 창이 아니라 새 업데이트 감지 시 자동으로 열리는
+   독립된 탭. .markdown-rendered는 Obsidian core 클래스라 릴리즈 노트 본문 타이포그래피는 별도
+   CSS 없이 그대로 예쁘게 나옴. */
+.ramen-changelog-view {
+	overflow-y: auto;
+	padding: var(--file-margins);
+}
+
+.ramen-changelog-page {
+	margin: 0 auto;
+	max-width: var(--file-line-width);
+}
+
+.ramen-changelog-page-title {
+	margin: 0 0 16px;
+}
+
 .ramen-changelog {
 	display: flex;
 	flex-direction: column;
+	gap: 20px;
 }
 
-.ramen-changelog-item {
+.ramen-changelog-entry {
 	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 16px;
 }
 
-.ramen-changelog-item:first-child {
+.ramen-changelog-entry:first-child {
 	border-top: none;
+	padding-top: 0;
 }
 
-.ramen-changelog-header {
-	align-items: center;
-	background: none !important;
-	border: none;
-	box-shadow: none !important;
-	cursor: pointer;
+.ramen-changelog-entry-header {
+	align-items: baseline;
 	display: flex;
 	gap: 8px;
-	padding: 8px 0;
-	width: 100%;
-}
-
-.ramen-changelog-caret {
-	color: var(--text-faint);
-	display: flex;
-	flex-shrink: 0;
-	transition: transform 0.15s ease-out;
-}
-
-.ramen-changelog-item.is-expanded .ramen-changelog-caret {
-	transform: rotate(90deg);
+	margin-bottom: 6px;
 }
 
 .ramen-changelog-version {
 	color: var(--text-normal);
-	font-size: var(--font-ui-small);
-	font-weight: 600;
+	font-size: var(--font-ui-medium);
+	font-weight: 700;
 }
 
 .ramen-changelog-date {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
-	margin-left: auto;
-}
-
-.ramen-changelog-body {
-	padding: 0 0 12px 22px;
 }
 
 .ramen-changelog-status {

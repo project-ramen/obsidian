@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { App, requestUrl, setIcon } from "obsidian";
+import { App, requestUrl, setIcon, TFolder } from "obsidian";
 import { BlogConfig, SectionProps } from "../types";
-import { FolderInput, SettingGroup, SettingRow } from "../components";
+import { FolderInput, IconDropdown, SettingGroup, SettingRow } from "../components";
 import { normalizeBlogUrl, persistBlogConnection } from "./blog";
 import { Locale, t } from "../../i18n";
+import { resolveFixedAttachmentDir } from "../../attachmentFolder";
+import { ConfirmModal } from "../../ConfirmModal";
 
 type ConnectStatus = "idle" | "ok" | "error";
 type DotColor = "yellow" | "green" | "red";
@@ -165,6 +167,44 @@ function BlogItem({
 		}
 	};
 
+	/**
+	 * 첨부파일 폴더 설정(모드 전환 또는 custom 이름 변경)이 바뀌면, 이전에 그 폴더에 저장돼 있던
+	 * 파일들을 새 위치로 옮길지 물어봄 — 안 옮기면 기존 파일은 그 자리에 남고 새로 pull되는 파일만
+	 * 새 위치에 쌓임. 이전/이후 둘 다 "고정된 폴더 하나"로 특정 가능할 때만(예: default 모드인데
+	 * Obsidian 전역 설정이 vault 루트/노트별 하위폴더처럼 파일마다 달라지면 이동 대상을 못 정하므로 스킵) 물어봄.
+	 */
+	const handleAttachmentFolderChange = (patch: Partial<Pick<BlogConfig, "attachmentFolderMode" | "attachmentFolder">>) => {
+		const oldDir = resolveFixedAttachmentDir(app, blog);
+		const newDir = resolveFixedAttachmentDir(app, { ...blog, ...patch });
+
+		if (oldDir && newDir && oldDir !== newDir) {
+			const oldFolder = app.vault.getAbstractFileByPath(oldDir);
+			if (oldFolder instanceof TFolder) {
+				new ConfirmModal(
+					app,
+					t(locale, "confirmMoveAttachmentFolderTitle"),
+					t(locale, "confirmMoveAttachmentFolderMessage", { from: oldDir, to: newDir }),
+					t(locale, "confirmMoveAttachmentFolderConfirm"),
+					t(locale, "confirmMoveAttachmentFolderCancel"),
+					(confirmed) => {
+						void (async () => {
+							if (confirmed) {
+								try {
+									await app.fileManager.renameFile(oldFolder, newDir);
+								} catch (e) {
+									console.warn("[ramen] attachment folder move failed", e);
+								}
+							}
+							onUpdate(patch);
+						})();
+					},
+				).open();
+				return;
+			}
+		}
+		onUpdate(patch);
+	};
+
 	const dotColor = statusDotColor(status);
 	const dragHandleRef = useRef<HTMLSpanElement>(null);
 	const deleteIconRef = useRef<HTMLSpanElement>(null);
@@ -297,22 +337,37 @@ function BlogItem({
 							name={t(locale, "settingsBlogAttachmentFolderName")}
 							description={t(locale, "settingsBlogAttachmentFolderDesc")}
 							control={
-								<input
-									type="text"
-									placeholder="attachments"
-									defaultValue={blog.attachmentFolder}
-									onBlur={(e) => {
-										if (
-											e.target.value !== blog.attachmentFolder
-										) {
-											onUpdate({
-												attachmentFolder: e.target.value,
-											});
-										}
-									}}
+								<IconDropdown
+									value={blog.attachmentFolderMode}
+									onChange={(mode) => handleAttachmentFolderChange({ attachmentFolderMode: mode })}
+									options={[
+										{ value: "default", label: t(locale, "settingsBlogAttachmentFolderModeDefault"), icon: "settings-2" },
+										{ value: "custom", label: t(locale, "settingsBlogAttachmentFolderModeCustom"), icon: "folder-plus" },
+									]}
 								/>
 							}
 						/>
+						{blog.attachmentFolderMode === "custom" && (
+							<SettingRow
+								description={t(locale, "settingsBlogAttachmentFolderCustomDesc")}
+								control={
+									<input
+										type="text"
+										placeholder="attachments"
+										defaultValue={blog.attachmentFolder}
+										onBlur={(e) => {
+											if (
+												e.target.value !== blog.attachmentFolder
+											) {
+												handleAttachmentFolderChange({
+													attachmentFolder: e.target.value,
+												});
+											}
+										}}
+									/>
+								}
+							/>
+						)}
 						<SettingRow
 							name={t(locale, "settingsBlogProjectTagName")}
 							description={t(locale, "settingsBlogProjectTagDesc")}
@@ -372,6 +427,7 @@ export function BlogsSection({ settings, save, app }: SectionProps) {
 			rootFolder: "",
 			link: "",
 			password: "",
+			attachmentFolderMode: "custom",
 			attachmentFolder: "attachments",
 			projectTag: "",
 		};

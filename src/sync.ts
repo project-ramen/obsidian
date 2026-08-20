@@ -1,5 +1,6 @@
 import { App, Notice, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { BlogConfig } from './settings/types';
+import { resolveFixedAttachmentDir } from './attachmentFolder';
 import { unwrapHtmlModeBody, wrapHtmlModeBody } from './commands/html-editor/htmlDocParts';
 import { Locale, t } from './i18n';
 import { debugLog } from './logger';
@@ -287,16 +288,22 @@ async function downloadServerImage(app: App, blog: BlogConfig, url: string, refe
 			console.warn(`[ramen pull] 이미지 다운로드 실패 (${res.status}): ${absoluteUrl}`);
 			return null;
 		}
-		// app.fileManager.getAvailablePathForAttachment는 Obsidian 전역 설정("파일 및 링크 > 새 첨부파일
-		// 기본 위치")을 그대로 따라서, 그 설정이 "vault 폴더"(기본값)면 블로그 rootFolder와 무관하게 무조건
-		// vault 루트에 저장돼버림 — 블로그별 attachmentFolder 설정을 무시하는 버그. 대신 rootFolder/
-		// attachmentFolder 아래 경로를 우리가 직접 정하고, 중복 파일명만 자체적으로 회피.
-		const attachDir = normalizePath(`${blog.rootFolder.replace(/\/+$/, '')}/${blog.attachmentFolder || 'attachments'}`);
-		if (!app.vault.getAbstractFileByPath(attachDir)) {
-			await app.vault.createFolder(attachDir);
+		let file: TFile;
+		if (blog.attachmentFolderMode === 'default') {
+			// 사용자가 설정 화면에서 명시적으로 "기본 설정 따름"을 선택한 경우에만 Obsidian 전역 설정
+			// ("파일 및 링크 > 새 첨부파일 기본 위치")을 그대로 따름 — vault 루트가 될 수도 있음을 알고 선택한 것.
+			const availablePath = await app.fileManager.getAvailablePathForAttachment(rawName, referenceFilePath);
+			file = await app.vault.createBinary(normalizePath(availablePath), res.arrayBuffer);
+		} else {
+			// 'custom' 모드: rootFolder/attachmentFolder 아래 경로를 직접 정하고, 중복 파일명은 자체적으로 회피
+			// (app.fileManager.getAvailablePathForAttachment에 맡기면 전역 설정이 우선돼 블로그별 지정이 무시됨).
+			const attachDir = resolveFixedAttachmentDir(app, blog)!;
+			if (!app.vault.getAbstractFileByPath(attachDir)) {
+				await app.vault.createFolder(attachDir);
+			}
+			const availablePath = availablePathInFolder(app, attachDir, rawName);
+			file = await app.vault.createBinary(availablePath, res.arrayBuffer);
 		}
-		const availablePath = availablePathInFolder(app, attachDir, rawName);
-		const file = await app.vault.createBinary(availablePath, res.arrayBuffer);
 		downloadedImageCache.set(cacheKey, file);
 		debugLog(`[ramen pull] 이미지 다운로드 성공: ${absoluteUrl} → ${file.path}`);
 		return file;
@@ -394,7 +401,7 @@ export function stripFrontmatter(content: string): string {
 
 /** Obsidian의 tags 속성은 목록이 정상이지만, 사용자가 "tags: foo" 처럼 단일 문자열로 쓰는 경우가 있다.
  *  이 경우 그대로 두면 배열이 아니라서 통째로 빈 배열([])로 취급돼 태그 기반 기능(예: project 승격)이 조용히 실패한다. */
-function normalizeTagsValue(raw: unknown): string[] {
+export function normalizeTagsValue(raw: unknown): string[] {
 	if (Array.isArray(raw)) return raw.filter((t): t is string => typeof t === 'string');
 	if (typeof raw === 'string' && raw.trim()) {
 		return raw.split(',').map((t) => t.trim()).filter(Boolean);

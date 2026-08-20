@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { App, EventRef, FileView, Menu, MarkdownView, setIcon, SplitDirection, TFile, WorkspaceLeaf } from 'obsidian';
+import { App, EventRef, FileView, Menu, MarkdownView, parseYaml, setIcon, SplitDirection, TFile, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
 import { HtmlDocParts, joinHtmlDoc, splitHtmlDoc, unwrapHtmlModeBody, wrapHtmlModeBody } from './htmlDocParts';
+import { attachBannerImage, resolveBannerSrc } from './bannerMeta';
 import { CodeEditor } from './CodeEditor';
+import { normalizeTagsValue } from '../../sync';
 
 export const HTML_EDITOR_VIEW_TYPE = 'ramen-html-editor';
 
@@ -30,29 +32,84 @@ function onVaultConfigChanged(app: App, callback: (key: string) => void): EventR
 	return vault.on('config-changed', callback);
 }
 
+/** frontmatter 블록(`---\n...\n---\n`) 원문을 파싱해서 title/banner/banner-url/description/tags를 뽑아냄.
+ *  render()가 매번 vault.read()로 읽은 원문을 그대로 넘겨주므로 metadataCache의 갱신 지연과
+ *  무관하게 항상 지금 디스크 내용과 일치한다.
+ *  published(공개 여부)는 여기 넣지 않음 — 단순 로컬 frontmatter 편집이 아니라 연결된 블로그별로
+ *  서버에 실제 PATCH 요청까지 보내는 별도 흐름(main.ts togglePostPublished)이라, 이 가벼운 패널이
+ *  아니라 기존 파일 메뉴("게시"/"비공개로 전환")를 그대로 씀. category도 frontmatter가 아니라
+ *  폴더 경로에서 자동으로 정해지는 값이라 여기서 편집할 대상이 아님. */
+function parseFrontmatterMeta(frontmatter: string): HtmlEditorMeta {
+	if (!frontmatter) return EMPTY_META;
+	const yaml = frontmatter.replace(/^---\n/, '').replace(/\n---\n?$/, '');
+	if (!yaml.trim()) return EMPTY_META;
+	try {
+		const fm = parseYaml(yaml) as Record<string, unknown> | null;
+		if (!fm || typeof fm !== 'object') return EMPTY_META;
+		return {
+			title: typeof fm['title'] === 'string' ? fm['title'] : '',
+			banner: typeof fm['banner'] === 'string' ? fm['banner'] : '',
+			bannerUrl: typeof fm['banner-url'] === 'string' ? fm['banner-url'] : '',
+			description: typeof fm['description'] === 'string' ? fm['description'] : '',
+			tagsInput: normalizeTagsValue(fm['tags']).join(', '),
+		};
+	} catch {
+		return EMPTY_META;
+	}
+}
+
 export type Tab = 'preview' | 'html' | 'css' | 'js';
 
+/** frontmatter의 title/banner/banner-url/description/tags — 값이 없으면 빈 문자열(controlled input용). */
+export interface HtmlEditorMeta {
+	title: string;
+	banner: string;
+	bannerUrl: string;
+	description: string;
+	/** 쉼표로 구분된 입력창 표시용 문자열. 실제 frontmatter tags 배열과의 변환은 persistMeta에서. */
+	tagsInput: string;
+}
+
+const EMPTY_META: HtmlEditorMeta = { title: '', banner: '', bannerUrl: '', description: '', tagsInput: '' };
+
 interface PanelProps {
+	app: App;
+	sourcePath: string;
 	initial: HtmlDocParts;
+	meta: HtmlEditorMeta;
 	locale: Locale;
 	showLineNumbers: boolean;
 	/** 탭 상태는 HtmlEditorView(뷰 헤더의 미리보기 아이콘)가 소유 — 패널 안 탭 버튼과 상단 아이콘이 같은 상태를 공유. */
 	tab: Tab;
 	onTabChange: (tab: Tab) => void;
 	onChange: (parts: HtmlDocParts) => void;
+	onMetaChange: (patch: Partial<HtmlEditorMeta>) => void;
 }
 
-function HtmlEditorPanel({ initial, locale, showLineNumbers, tab, onTabChange, onChange }: PanelProps) {
+function HtmlEditorPanel({ app, sourcePath, initial, meta, locale, showLineNumbers, tab, onTabChange, onChange, onMetaChange }: PanelProps) {
 	const [parts, setParts] = useState<HtmlDocParts>(initial);
 	const debounceRef = useRef<number | null>(null);
+	const [metaState, setMetaState] = useState<HtmlEditorMeta>(meta);
+	const metaDebounceRef = useRef<number | null>(null);
+	// 디바운스 타이머가 아직 안 터진 동안 서로 다른 필드(예: 설명 입력 중 배너 링크도 수정)를 잇달아
+	// 바꾸면, 매번 새 타이머로 이전 타이머를 취소하면서 그 호출의 patch만 남기면 먼저 바뀐 필드가
+	// 저장 안 되고 유실됨 — 그래서 터질 때까지의 patch를 여기 누적해서 한 번에 onMetaChange로 보냄.
+	const pendingMetaPatchRef = useRef<Partial<HtmlEditorMeta>>({});
+	const [bannerUploading, setBannerUploading] = useState(false);
+	const bannerFileInputRef = useRef<HTMLInputElement>(null);
 
 	// 다른 파일로 전환되거나(setFile) 외부(pull 등)에서 파일이 바뀌면 편집 중인 내용을 새로 반영
 	useEffect(() => {
 		setParts(initial);
 	}, [initial]);
 
+	useEffect(() => {
+		setMetaState(meta);
+	}, [meta]);
+
 	useEffect(() => () => {
 		if (debounceRef.current) window.clearTimeout(debounceRef.current);
+		if (metaDebounceRef.current) window.clearTimeout(metaDebounceRef.current);
 	}, []);
 
 	const update = (patch: Partial<HtmlDocParts>) => {
@@ -61,6 +118,40 @@ function HtmlEditorPanel({ initial, locale, showLineNumbers, tab, onTabChange, o
 		if (debounceRef.current) window.clearTimeout(debounceRef.current);
 		debounceRef.current = window.setTimeout(() => onChange(next), 500);
 	};
+
+	const updateMeta = (patch: Partial<HtmlEditorMeta>, immediate = false) => {
+		const next = { ...metaState, ...patch };
+		setMetaState(next);
+		if (metaDebounceRef.current) window.clearTimeout(metaDebounceRef.current);
+		if (immediate) {
+			pendingMetaPatchRef.current = {};
+			onMetaChange(patch);
+		} else {
+			pendingMetaPatchRef.current = { ...pendingMetaPatchRef.current, ...patch };
+			metaDebounceRef.current = window.setTimeout(() => {
+				const merged = pendingMetaPatchRef.current;
+				pendingMetaPatchRef.current = {};
+				onMetaChange(merged);
+			}, 500);
+		}
+	};
+
+	const handleBannerFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		e.target.value = '';
+		if (!file) return;
+		setBannerUploading(true);
+		try {
+			const link = await attachBannerImage(app, sourcePath, file);
+			updateMeta({ banner: link }, true);
+		} finally {
+			setBannerUploading(false);
+		}
+	};
+
+	const bannerSrc = resolveBannerSrc(app, sourcePath, metaState.banner);
+	// frontmatter title이 비어있으면 sync.ts도 파일명을 제목으로 씀 — placeholder로 그 기본값을 보여줌.
+	const fileBasename = sourcePath.split('/').pop()?.replace(/\.md$/, '') ?? '';
 
 	// Preview는 탭 바가 아니라 뷰 헤더의 아이콘으로 접근 — 여기 탭 바에는 HTML/CSS/JS만.
 	const tabs: { key: Tab; label: string }[] = [
@@ -71,6 +162,98 @@ function HtmlEditorPanel({ initial, locale, showLineNumbers, tab, onTabChange, o
 
 	return (
 		<div className="ramen-html-editor">
+			<div className="ramen-html-editor-meta">
+				<div className="ramen-html-editor-meta-field">
+					<label htmlFor="ramen-html-editor-title" className="ramen-html-editor-meta-label">
+						{t(locale, 'htmlEditorTitleLabel')}
+					</label>
+					<input
+						id="ramen-html-editor-title"
+						type="text"
+						className="ramen-html-editor-meta-input"
+						value={metaState.title}
+						placeholder={fileBasename}
+						onChange={(e) => updateMeta({ title: e.target.value })}
+					/>
+				</div>
+				<div className="ramen-html-editor-meta-field">
+					<span className="ramen-html-editor-meta-label">{t(locale, 'htmlEditorBannerLabel')}</span>
+					<div className="ramen-html-editor-meta-banner">
+						{bannerSrc ? (
+							<img src={bannerSrc} alt="" className="ramen-html-editor-meta-banner-preview" />
+						) : (
+							<div className="ramen-html-editor-meta-banner-empty">{t(locale, 'htmlEditorBannerNone')}</div>
+						)}
+						<div className="ramen-html-editor-meta-banner-actions">
+							<button
+								type="button"
+								className="ramen-html-editor-meta-button"
+								disabled={bannerUploading}
+								onClick={() => bannerFileInputRef.current?.click()}
+							>
+								{bannerUploading ? t(locale, 'htmlEditorBannerUploading') : metaState.banner ? t(locale, 'htmlEditorBannerChange') : t(locale, 'htmlEditorBannerUpload')}
+							</button>
+							{metaState.banner && (
+								<button
+									type="button"
+									className="ramen-html-editor-meta-button is-danger"
+									onClick={() => updateMeta({ banner: '', bannerUrl: '' }, true)}
+								>
+									{t(locale, 'htmlEditorBannerClear')}
+								</button>
+							)}
+							<input
+								ref={bannerFileInputRef}
+								type="file"
+								accept="image/*"
+								className="ramen-html-editor-hidden-input"
+								onChange={(e) => void handleBannerFileSelected(e)}
+							/>
+						</div>
+					</div>
+				</div>
+				{metaState.banner && (
+					<div className="ramen-html-editor-meta-field">
+						<label htmlFor="ramen-html-editor-banner-url" className="ramen-html-editor-meta-label">
+							{t(locale, 'htmlEditorBannerUrlLabel')}
+						</label>
+						<input
+							id="ramen-html-editor-banner-url"
+							type="text"
+							className="ramen-html-editor-meta-input"
+							value={metaState.bannerUrl}
+							placeholder={t(locale, 'htmlEditorBannerUrlPlaceholder')}
+							onChange={(e) => updateMeta({ bannerUrl: e.target.value })}
+						/>
+					</div>
+				)}
+				<div className="ramen-html-editor-meta-field">
+					<label htmlFor="ramen-html-editor-description" className="ramen-html-editor-meta-label">
+						{t(locale, 'htmlEditorDescriptionLabel')}
+					</label>
+					<textarea
+						id="ramen-html-editor-description"
+						className="ramen-html-editor-meta-description"
+						rows={2}
+						value={metaState.description}
+						placeholder={t(locale, 'htmlEditorDescriptionPlaceholder')}
+						onChange={(e) => updateMeta({ description: e.target.value })}
+					/>
+				</div>
+				<div className="ramen-html-editor-meta-field">
+					<label htmlFor="ramen-html-editor-tags" className="ramen-html-editor-meta-label">
+						{t(locale, 'htmlEditorTagsLabel')}
+					</label>
+					<input
+						id="ramen-html-editor-tags"
+						type="text"
+						className="ramen-html-editor-meta-input"
+						value={metaState.tagsInput}
+						placeholder={t(locale, 'htmlEditorTagsPlaceholder')}
+						onChange={(e) => updateMeta({ tagsInput: e.target.value })}
+					/>
+				</div>
+			</div>
 			{tab !== 'preview' && (
 				<div className="ramen-html-editor-tabs">
 					{tabs.map(({ key, label }) => (
@@ -257,11 +440,15 @@ export class HtmlEditorView extends FileView {
 		const fmMatch = raw.match(FRONTMATTER_RE);
 		const frontmatter = fmMatch ? fmMatch[0] : '';
 		const parts = splitHtmlDoc(unwrapHtmlModeBody(raw.slice(frontmatter.length)));
+		const meta = parseFrontmatterMeta(frontmatter);
 
 		this.root.render(
 			<HtmlEditorPanel
 				key={this.file.path}
+				app={this.app}
+				sourcePath={this.file.path}
 				initial={parts}
+				meta={meta}
 				locale={this.locale}
 				showLineNumbers={getShowLineNumbersSetting(this.app)}
 				tab={this.tab}
@@ -273,6 +460,7 @@ export class HtmlEditorView extends FileView {
 					void this.render();
 				}}
 				onChange={(next) => void this.persist(frontmatter, next)}
+				onMetaChange={(patch) => void this.persistMeta(patch)}
 			/>
 		);
 	}
@@ -280,6 +468,36 @@ export class HtmlEditorView extends FileView {
 	private async persist(frontmatter: string, parts: HtmlDocParts): Promise<void> {
 		if (!this.file) return;
 		await this.app.vault.modify(this.file, `${frontmatter}${wrapHtmlModeBody(joinHtmlDoc(parts))}`);
+	}
+
+	/** banner/banner-url/description frontmatter 필드만 갱신 — 본문(html/css/js)은 건드리지 않음.
+	 *  processFrontMatter는 저장 시점 최신 파일 내용을 다시 읽어서 patch하므로 persist()와 거의 동시에
+	 *  호출돼도 서로 덮어쓰지 않는다. */
+	private async persistMeta(patch: Partial<HtmlEditorMeta>): Promise<void> {
+		if (!this.file) return;
+		await this.app.fileManager.processFrontMatter(this.file, (fm: Record<string, unknown>) => {
+			if ('title' in patch) {
+				if (patch.title) fm['title'] = patch.title;
+				else delete fm['title'];
+			}
+			if ('banner' in patch) {
+				if (patch.banner) fm['banner'] = patch.banner;
+				else delete fm['banner'];
+			}
+			if ('bannerUrl' in patch) {
+				if (patch.bannerUrl) fm['banner-url'] = patch.bannerUrl;
+				else delete fm['banner-url'];
+			}
+			if ('description' in patch) {
+				if (patch.description) fm['description'] = patch.description;
+				else delete fm['description'];
+			}
+			if ('tagsInput' in patch) {
+				const tags = normalizeTagsValue(patch.tagsInput);
+				if (tags.length > 0) fm['tags'] = tags;
+				else delete fm['tags'];
+			}
+		});
 	}
 }
 

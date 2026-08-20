@@ -13,6 +13,7 @@ import { normalizeBlogUrl, persistBlogConnection } from './settings/blogs/blog';
 import { t } from './i18n';
 import { debugLog, setDebugMode } from './logger';
 import { fetchLatestRelease, installRelease, isNewerVersion } from './update-checker';
+import { CHANGELOG_VIEW_TYPE, ChangelogView, openChangelogView } from './commands/changelog/ChangelogView';
 
 export default class RamenPlugin extends Plugin {
 	settings!: RamenPluginSettings;
@@ -55,6 +56,7 @@ export default class RamenPlugin extends Plugin {
 			HTML_EDITOR_VIEW_TYPE,
 			(leaf) => new HtmlEditorView(leaf, this.settings.language, this.settings.htmlEditorDefaultTab),
 		);
+		this.registerView(CHANGELOG_VIEW_TYPE, (leaf) => new ChangelogView(leaf, this.settings.language));
 
 		this.addCommand({
 			id: 'insert-image',
@@ -195,6 +197,7 @@ export default class RamenPlugin extends Plugin {
 				await this.refreshUploadedFromServer();
 			})();
 			void this.checkForUpdates();
+			void this.showChangelogIfUpdated();
 			// Obsidian 재시작 등으로 html_mode 노트가 이미 마크다운 탭으로 열려있는 채로 시작한 경우도 전환.
 			for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 				if (leaf.view instanceof MarkdownView) this.ensureHtmlModeAction(leaf.view);
@@ -664,8 +667,16 @@ export default class RamenPlugin extends Plugin {
 		setDebugMode(this.settings.debugMode);
 		this.settings.blogs = this.settings.blogs.map(b => {
 			const migrated = !b.attachmentFolder;
-			const blog = { ...b, attachmentFolder: b.attachmentFolder || 'attachments' };
+			// attachmentFolderMode가 아예 없던 예전 설정(select 도입 전)은 무조건 'custom'으로 —
+			// 그래야 이미 쓰던 attachmentFolder 값이 그대로 유지되고 동작이 안 바뀜.
+			const modeMigrated = !b.attachmentFolderMode;
+			const blog = {
+				...b,
+				attachmentFolder: b.attachmentFolder || 'attachments',
+				attachmentFolderMode: b.attachmentFolderMode ?? 'custom' as const,
+			};
 			if (migrated) debugLog(`[ramen] loadSettings: attachmentFolder 기본값 적용 → ${blog.rootFolder || blog.id}`);
+			if (modeMigrated) debugLog(`[ramen] loadSettings: attachmentFolderMode 기본값(custom) 적용 → ${blog.rootFolder || blog.id}`);
 			return blog;
 		});
 		debugLog(`[ramen] loadSettings 완료: 블로그 ${this.settings.blogs.length}개, hideAttachmentFolder=${this.settings.hideAttachmentFolder}`);
@@ -864,6 +875,23 @@ export default class RamenPlugin extends Plugin {
 	async saveSettings() {
 		setDebugMode(this.settings.debugMode);
 		await this.saveData(this.settings);
+	}
+
+	/**
+	 * 로드된 버전(manifest.version)이 마지막으로 업데이트 내역을 보여준 버전과 다르면(=새로
+	 * 업데이트된 채로 이번에 처음 로드된 것) "업데이트 내역" 페이지를 새 탭으로 자동으로 연다.
+	 * 최초 설치(changelogLastSeenVersion이 아예 없음)일 땐 안 띄우고 조용히 현재 버전만 기록.
+	 */
+	private async showChangelogIfUpdated(): Promise<void> {
+		const current = this.manifest.version;
+		const lastSeen = this.settings.changelogLastSeenVersion;
+		if (lastSeen && lastSeen !== current) {
+			await openChangelogView(this.app, lastSeen, current);
+		}
+		if (lastSeen !== current) {
+			this.settings.changelogLastSeenVersion = current;
+			await this.saveSettings();
+		}
 	}
 
 	/**

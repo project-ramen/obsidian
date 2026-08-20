@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Compartment, EditorState, Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { search, searchKeymap } from '@codemirror/search';
 import { bracketMatching, HighlightStyle, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { html } from '@codemirror/lang-html';
@@ -97,7 +98,10 @@ export function CodeEditor({ lang, value, onChange, showLineNumbers }: CodeEdito
 				indentUnit.of('  '),
 				syntaxHighlighting(ramenHighlightStyle),
 				languageExtension(lang),
-				keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+				search(),
+				// Cmd/Ctrl+F로 이 코드 탭 안에서 찾기 — searchKeymap을 안 넣으면 일반 에디터의
+				// Cmd/Ctrl+F가 여기선 그냥 아무 동작도 안 함(브라우저 기본 찾기도 Obsidian이 가로챔).
+				keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
 				EditorView.lineWrapping,
 				baseTheme,
 				EditorView.updateListener.of((update) => {
