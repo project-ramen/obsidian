@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { App, EventRef, FileView, Menu, MarkdownView, Notice, parseYaml, setIcon, SplitDirection, TFile, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
@@ -100,9 +100,24 @@ function HtmlEditorPanel({ app, sourcePath, blog, initial, meta, locale, showLin
 	// 바꾸면, 매번 새 타이머로 이전 타이머를 취소하면서 그 호출의 patch만 남기면 먼저 바뀐 필드가
 	// 저장 안 되고 유실됨 — 그래서 터질 때까지의 patch를 여기 누적해서 한 번에 onMetaChange로 보냄.
 	const pendingMetaPatchRef = useRef<Partial<HtmlEditorMeta>>({});
+	// 제목 말고는 자주 안 건드리는 필드라 기본은 접어둠 — 코드 에디터에 화면을 더 내줌.
+	const [metaExpanded, setMetaExpanded] = useState(false);
+	// 아이콘은 React가 관리하는 텍스트 자식과 같은 요소에 넣으면 setIcon의 직접 DOM 조작이 리렌더 때
+	// 리액트 쪽 children이랑 충돌남 — 그래서 아이콘 전용 빈 span을 따로 두고 그것만 setIcon으로 채움.
+	const metaToggleIconRef = useRef<HTMLSpanElement>(null);
+	useEffect(() => {
+		if (metaToggleIconRef.current) setIcon(metaToggleIconRef.current, metaExpanded ? 'chevron-up' : 'chevron-down');
+	}, [metaExpanded]);
 	const [bannerUploading, setBannerUploading] = useState(false);
 	const [forceUploading, setForceUploading] = useState(false);
 	const bannerFileInputRef = useRef<HTMLInputElement>(null);
+	// 순정 아이콘 버튼(lucide "more-vertical")은 CSS만으로 못 그리니 Obsidian의 setIcon으로 주입.
+	// 배너 블록이 metaExpanded일 때만 마운트되는 조건부 렌더링이라, 마운트 시점에 한 번만 도는
+	// useEffect(ref, [])로는 접힌 채로 처음 열렸을 때 ref가 아직 null이라 못 그림 — 콜백 ref로
+	// 바꿔서 실제로 DOM에 붙는 순간(펼칠 때마다) 매번 아이콘을 그리게 함.
+	const bannerMenuBtnRef = useCallback((el: HTMLButtonElement | null) => {
+		if (el) setIcon(el, 'more-vertical');
+	}, []);
 
 	// 다른 파일로 전환되거나(setFile) 외부(pull 등)에서 파일이 바뀌면 편집 중인 내용을 새로 반영
 	useEffect(() => {
@@ -148,7 +163,7 @@ function HtmlEditorPanel({ app, sourcePath, blog, initial, meta, locale, showLin
 		if (!file) return;
 		setBannerUploading(true);
 		try {
-			const link = await attachBannerImage(app, sourcePath, file);
+			const link = await attachBannerImage(app, sourcePath, file, blog);
 			updateMeta({ banner: link }, true);
 		} finally {
 			setBannerUploading(false);
@@ -212,6 +227,32 @@ function HtmlEditorPanel({ app, sourcePath, blog, initial, meta, locale, showLin
 		).open();
 	};
 
+	/** 배너 이미지 위 "..." 버튼 — 이미지 변경/무시하고 다시 업로드/배너 삭제를 한 메뉴로 모음. */
+	const openBannerMenu = (evt: MouseEvent) => {
+		const menu = new Menu();
+		menu.addItem((item) => item
+			.setTitle(metaState.banner ? t(locale, 'htmlEditorBannerChange') : t(locale, 'htmlEditorBannerUpload'))
+			.setIcon('image-plus')
+			.onClick(() => bannerFileInputRef.current?.click())
+		);
+		if (canForceReupload) {
+			menu.addItem((item) => item
+				.setTitle(t(locale, 'htmlEditorBannerForceReupload'))
+				.setIcon('refresh-cw')
+				.onClick(() => void handleForceReupload())
+			);
+		}
+		if (metaState.banner) {
+			menu.addItem((item) => item
+				.setTitle(t(locale, 'htmlEditorBannerClear'))
+				.setIcon('trash-2')
+				.setWarning(true)
+				.onClick(() => handleBannerRemove())
+			);
+		}
+		menu.showAtMouseEvent(evt);
+	};
+
 	// Preview는 탭 바가 아니라 뷰 헤더의 아이콘으로 접근 — 여기 탭 바에는 HTML/CSS/JS만.
 	const tabs: { key: Tab; label: string }[] = [
 		{ key: 'html', label: 'HTML' },
@@ -226,103 +267,95 @@ function HtmlEditorPanel({ app, sourcePath, blog, initial, meta, locale, showLin
 					<label htmlFor="ramen-html-editor-title" className="ramen-html-editor-meta-label">
 						{t(locale, 'htmlEditorTitleLabel')}
 					</label>
-					<input
-						id="ramen-html-editor-title"
-						type="text"
-						className="ramen-html-editor-meta-input"
-						value={metaState.title}
-						placeholder={fileBasename}
-						onChange={(e) => updateMeta({ title: e.target.value })}
-					/>
-				</div>
-				<div className="ramen-html-editor-meta-field">
-					<span className="ramen-html-editor-meta-label">{t(locale, 'htmlEditorBannerLabel')}</span>
-					<div className="ramen-html-editor-meta-banner">
-						{bannerSrc ? (
-							<img src={bannerSrc} alt="" className="ramen-html-editor-meta-banner-preview" />
-						) : (
-							<div className="ramen-html-editor-meta-banner-empty">{t(locale, 'htmlEditorBannerNone')}</div>
-						)}
-						<div className="ramen-html-editor-meta-banner-actions">
-							<button
-								type="button"
-								className="ramen-html-editor-meta-button"
-								disabled={bannerUploading}
-								onClick={() => bannerFileInputRef.current?.click()}
-							>
-								{bannerUploading ? t(locale, 'htmlEditorBannerUploading') : metaState.banner ? t(locale, 'htmlEditorBannerChange') : t(locale, 'htmlEditorBannerUpload')}
-							</button>
-							{canForceReupload && (
-								<button
-									type="button"
-									className="ramen-html-editor-meta-button"
-									disabled={forceUploading}
-									onClick={() => void handleForceReupload()}
-									title={t(locale, 'htmlEditorBannerForceReuploadHint')}
-								>
-									{forceUploading ? t(locale, 'htmlEditorBannerUploading') : t(locale, 'htmlEditorBannerForceReupload')}
-								</button>
-							)}
-							{metaState.banner && (
-								<button
-									type="button"
-									className="ramen-html-editor-meta-button is-danger"
-									onClick={handleBannerRemove}
-								>
-									{t(locale, 'htmlEditorBannerClear')}
-								</button>
-							)}
-							<input
-								ref={bannerFileInputRef}
-								type="file"
-								accept="image/*"
-								className="ramen-html-editor-hidden-input"
-								onChange={(e) => void handleBannerFileSelected(e)}
-							/>
-						</div>
-					</div>
-				</div>
-				{metaState.banner && (
-					<div className="ramen-html-editor-meta-field">
-						<label htmlFor="ramen-html-editor-banner-url" className="ramen-html-editor-meta-label">
-							{t(locale, 'htmlEditorBannerUrlLabel')}
-						</label>
+					<div className="ramen-html-editor-meta-title-row">
 						<input
-							id="ramen-html-editor-banner-url"
+							id="ramen-html-editor-title"
 							type="text"
 							className="ramen-html-editor-meta-input"
-							value={metaState.bannerUrl}
-							placeholder={t(locale, 'htmlEditorBannerUrlPlaceholder')}
-							onChange={(e) => updateMeta({ bannerUrl: e.target.value })}
+							value={metaState.title}
+							placeholder={fileBasename}
+							onChange={(e) => updateMeta({ title: e.target.value })}
 						/>
+						<button
+							type="button"
+							className="ramen-html-editor-meta-toggle"
+							aria-label={t(locale, metaExpanded ? 'htmlEditorMetaCollapse' : 'htmlEditorMetaExpand')}
+							onClick={() => setMetaExpanded((v) => !v)}
+						>
+							<span ref={metaToggleIconRef} className="ramen-html-editor-meta-toggle-icon" />
+						</button>
 					</div>
+				</div>
+				{metaExpanded && (
+					<>
+						<div className="ramen-html-editor-meta-field">
+							<span className="ramen-html-editor-meta-label">{t(locale, 'htmlEditorBannerLabel')}</span>
+							<div className="ramen-html-editor-meta-banner-full">
+								{bannerSrc ? (
+									<img src={bannerSrc} alt="" className="ramen-html-editor-meta-banner-full-img" />
+								) : (
+									<div className="ramen-html-editor-meta-banner-full-empty">{t(locale, 'htmlEditorBannerNone')}</div>
+								)}
+								<button
+									ref={bannerMenuBtnRef}
+									type="button"
+									className="ramen-html-editor-meta-banner-menu-btn"
+									aria-label={t(locale, 'htmlEditorBannerMenuLabel')}
+									disabled={bannerUploading || forceUploading}
+									onClick={(e) => openBannerMenu(e.nativeEvent)}
+								/>
+								<input
+									ref={bannerFileInputRef}
+									type="file"
+									accept="image/*"
+									className="ramen-html-editor-hidden-input"
+									onChange={(e) => void handleBannerFileSelected(e)}
+								/>
+							</div>
+						</div>
+						{metaState.banner && (
+							<div className="ramen-html-editor-meta-field">
+								<label htmlFor="ramen-html-editor-banner-url" className="ramen-html-editor-meta-label">
+									{t(locale, 'htmlEditorBannerUrlLabel')}
+								</label>
+								<input
+									id="ramen-html-editor-banner-url"
+									type="text"
+									className="ramen-html-editor-meta-input"
+									value={metaState.bannerUrl}
+									placeholder={t(locale, 'htmlEditorBannerUrlPlaceholder')}
+									onChange={(e) => updateMeta({ bannerUrl: e.target.value })}
+								/>
+							</div>
+						)}
+						<div className="ramen-html-editor-meta-field">
+							<label htmlFor="ramen-html-editor-description" className="ramen-html-editor-meta-label">
+								{t(locale, 'htmlEditorDescriptionLabel')}
+							</label>
+							<textarea
+								id="ramen-html-editor-description"
+								className="ramen-html-editor-meta-description"
+								rows={2}
+								value={metaState.description}
+								placeholder={t(locale, 'htmlEditorDescriptionPlaceholder')}
+								onChange={(e) => updateMeta({ description: e.target.value })}
+							/>
+						</div>
+						<div className="ramen-html-editor-meta-field">
+							<label htmlFor="ramen-html-editor-tags" className="ramen-html-editor-meta-label">
+								{t(locale, 'htmlEditorTagsLabel')}
+							</label>
+							<input
+								id="ramen-html-editor-tags"
+								type="text"
+								className="ramen-html-editor-meta-input"
+								value={metaState.tagsInput}
+								placeholder={t(locale, 'htmlEditorTagsPlaceholder')}
+								onChange={(e) => updateMeta({ tagsInput: e.target.value })}
+							/>
+						</div>
+					</>
 				)}
-				<div className="ramen-html-editor-meta-field">
-					<label htmlFor="ramen-html-editor-description" className="ramen-html-editor-meta-label">
-						{t(locale, 'htmlEditorDescriptionLabel')}
-					</label>
-					<textarea
-						id="ramen-html-editor-description"
-						className="ramen-html-editor-meta-description"
-						rows={2}
-						value={metaState.description}
-						placeholder={t(locale, 'htmlEditorDescriptionPlaceholder')}
-						onChange={(e) => updateMeta({ description: e.target.value })}
-					/>
-				</div>
-				<div className="ramen-html-editor-meta-field">
-					<label htmlFor="ramen-html-editor-tags" className="ramen-html-editor-meta-label">
-						{t(locale, 'htmlEditorTagsLabel')}
-					</label>
-					<input
-						id="ramen-html-editor-tags"
-						type="text"
-						className="ramen-html-editor-meta-input"
-						value={metaState.tagsInput}
-						placeholder={t(locale, 'htmlEditorTagsPlaceholder')}
-						onChange={(e) => updateMeta({ tagsInput: e.target.value })}
-					/>
-				</div>
 			</div>
 			{tab !== 'preview' && (
 				<div className="ramen-html-editor-tabs">

@@ -1,4 +1,7 @@
 import { App, TFile, normalizePath } from 'obsidian';
+import { BlogConfig } from '../../settings/types';
+import { resolveFixedAttachmentDir } from '../../attachmentFolder';
+import { availablePathInFolder } from '../../sync';
 
 const WIKILINK_RE = /^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
 const MD_IMAGE_RE = /^!\[[^\]]*\]\(([^)\s]+)\)$/;
@@ -37,12 +40,21 @@ export function resolveBannerFile(app: App, sourcePath: string, raw: string | un
 }
 
 /**
- * 로컬에서 고른 이미지 파일을 Obsidian의 "새 첨부파일 기본 위치" 설정을 따라 vault에 저장하고,
- * frontmatter banner 값으로 바로 쓸 수 있는 위키링크 문자열을 반환.
+ * 로컬에서 고른 이미지 파일을 vault에 저장하고 frontmatter banner 값으로 바로 쓸 수 있는 위키링크
+ * 문자열을 반환. downloadServerImage(sync.ts, pull용)와 같은 규칙: 연결된 블로그가 있고 그 블로그의
+ * attachmentFolderMode가 'custom'이면 그 지정 폴더로, 그 외(연결된 블로그 없음/'default' 모드)엔
+ * Obsidian의 "새 첨부파일 기본 위치" 전역 설정을 따름.
  */
-export async function attachBannerImage(app: App, sourcePath: string, file: File): Promise<string> {
+export async function attachBannerImage(app: App, sourcePath: string, file: File, blog: BlogConfig | null): Promise<string> {
 	const buf = await file.arrayBuffer();
-	const availablePath = await app.fileManager.getAvailablePathForAttachment(file.name, sourcePath);
-	const saved = await app.vault.createBinary(normalizePath(availablePath), buf);
+	const fixedDir = blog?.attachmentFolderMode === 'custom' ? resolveFixedAttachmentDir(app, blog) : null;
+	let savedPath: string;
+	if (fixedDir) {
+		if (!app.vault.getAbstractFileByPath(fixedDir)) await app.vault.createFolder(fixedDir);
+		savedPath = availablePathInFolder(app, fixedDir, file.name);
+	} else {
+		savedPath = normalizePath(await app.fileManager.getAvailablePathForAttachment(file.name, sourcePath));
+	}
+	const saved = await app.vault.createBinary(savedPath, buf);
 	return `[[${saved.name}]]`;
 }

@@ -304,7 +304,7 @@ const downloadedImageCache = new Map<string, TFile>();
 const SERVER_UPLOAD_MD_IMAGE_RE = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
 
 /** dir 안에서 filename과 안 겹치는 경로를 찾음 — 겹치면 Obsidian 컨벤션대로 "이름 2.ext", "이름 3.ext" 순으로 증가. */
-function availablePathInFolder(app: App, dir: string, filename: string): string {
+export function availablePathInFolder(app: App, dir: string, filename: string): string {
 	const dot = filename.lastIndexOf('.');
 	const base = dot > 0 ? filename.slice(0, dot) : filename;
 	const ext = dot > 0 ? filename.slice(dot) : '';
