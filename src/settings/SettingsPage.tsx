@@ -51,6 +51,9 @@ export function SettingsPage({ plugin }: { plugin: RamenPlugin }) {
 		if ("blogs" in patch) {
 			plugin.applyPublishedFileMarkers();
 		}
+		if ("language" in patch) {
+			plugin.updateCommandNames();
+		}
 	};
 
 	const sections: Section[] = ["blogs", "general", "appearance"];

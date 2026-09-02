@@ -40,6 +40,31 @@ export default class RamenPlugin extends Plugin {
 	/** "HTML 모드로 전환" 아이콘을 이미 추가한 MarkdownView 인스턴스 (같은 leaf가 재사용될 때 중복 추가 방지) */
 	private _markdownViewsWithHtmlModeAction = new WeakSet<MarkdownView>();
 
+	/** addCommand로 등록한 명령어 id → 이름 i18n 키. 언어 설정 바뀔 때 updateCommandNames가 이걸로 재라벨링함. */
+	private static readonly COMMAND_NAME_KEYS: { id: string; key: Parameters<typeof t>[1] }[] = [
+		{ id: 'insert-image', key: 'cmdInsertImage' },
+		{ id: 'view-all-comments', key: 'cmdViewAllComments' },
+		{ id: 'sync-posts', key: 'cmdSyncPosts' },
+		{ id: 'reconnect-blog', key: 'cmdReconnectBlog' },
+		{ id: 'pull-posts', key: 'cmdPullPosts' },
+		{ id: 'force-pull-posts', key: 'cmdForcePullPosts' },
+		{ id: 'check-for-updates', key: 'cmdCheckForUpdates' },
+	];
+
+	/**
+	 * addCommand로 등록한 명령어는 그 순간 언어로 name이 고정돼버려서, 설정에서 언어를 바꿔도
+	 * 명령 팔레트에 뜨는 이름이 안 바뀜. Obsidian이 command rename 공식 API를 안 줘서
+	 * app.commands.commands(비공개 API)를 직접 건드려 이름만 갱신 — 이미 등록된 콜백/단축키는 그대로 둠.
+	 */
+	updateCommandNames(): void {
+		const commandsApi = (this.app as unknown as { commands?: { commands?: Record<string, { name: string }> } }).commands?.commands;
+		if (!commandsApi) return;
+		for (const { id, key } of RamenPlugin.COMMAND_NAME_KEYS) {
+			const cmd = commandsApi[`${this.manifest.id}:${id}`];
+			if (cmd) cmd.name = t(this.settings.language, key);
+		}
+	}
+
 	async onload() {
 		await this.loadSettings();
 		this.applyAttachmentFolderHiding();
