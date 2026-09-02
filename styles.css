@@ -1006,3 +1006,56 @@
 	font-size: var(--font-ui-small);
 	padding: 4px 0;
 }
+
+/* "이전 업데이트 내역" — 위 새 릴리즈 목록과 구분되는 아코디언, 기본은 전부 접혀있음 */
+.ramen-changelog-past {
+	border-top: 1px solid var(--background-modifier-border);
+	margin-top: 28px;
+	padding-top: 20px;
+}
+
+.ramen-changelog-past-title {
+	color: var(--text-muted);
+	font-size: var(--font-ui-medium);
+	margin: 0 0 8px;
+}
+
+.ramen-changelog-accordion {
+	display: flex;
+	flex-direction: column;
+}
+
+.ramen-changelog-accordion-entry {
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ramen-changelog-accordion-header {
+	align-items: center;
+	background: none;
+	border: none;
+	box-shadow: none !important;
+	cursor: pointer;
+	display: flex;
+	gap: 8px;
+	padding: 10px 0;
+	width: 100%;
+}
+
+.ramen-changelog-accordion-header:hover .ramen-changelog-version {
+	color: var(--text-accent);
+}
+
+.ramen-changelog-accordion-chevron {
+	color: var(--text-faint);
+	display: flex;
+	flex-shrink: 0;
+	transition: transform 0.15s ease;
+}
+
+.ramen-changelog-accordion-chevron.is-open {
+	transform: rotate(90deg);
+}
+
+.ramen-changelog-accordion-entry .ramen-changelog-body {
+	padding: 0 0 14px 22px;
+}

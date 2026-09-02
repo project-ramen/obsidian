@@ -177,6 +177,8 @@ const ko = {
 	changelogFailed: '업데이트 내역을 불러오지 못했습니다',
 	changelogEmpty: '아직 릴리즈가 없습니다',
 	changelogNoNotes: '(이 버전에 대한 노트가 없습니다)',
+	changelogPastTitle: '이전 업데이트 내역',
+	changelogPastEmpty: '이전 업데이트 내역이 없습니다',
 
 	settingsThemeColorName: '테마 색상',
 	settingsThemeColorDesc: 'Obsidian 설정을 따르거나 앱 테마를 직접 지정',
@@ -396,6 +398,8 @@ const en: Record<TranslationKey, string> = {
 	changelogFailed: 'Failed to load changelog',
 	changelogEmpty: 'No releases yet',
 	changelogNoNotes: '(No notes for this version)',
+	changelogPastTitle: 'Past updates',
+	changelogPastEmpty: 'No past updates',
 
 	settingsThemeColorName: 'Theme color',
 	settingsThemeColorDesc: "Override the app theme or follow Obsidian's setting",

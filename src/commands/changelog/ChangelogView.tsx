@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { App, Component, ItemView, MarkdownRenderer, ViewStateResult, WorkspaceLeaf } from 'obsidian';
+import { App, Component, ItemView, MarkdownRenderer, setIcon, ViewStateResult, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
 import { fetchReleaseHistory, isNewerVersion, ReleaseHistoryEntry } from '../../update-checker';
+
+/** "이전 업데이트 내역" 아코디언에서 몇 개까지 받아올지 — GitHub API 한 번 호출, 대부분 전체 히스토리를 덮음. */
+const PAST_HISTORY_LIMIT = 50;
 
 export const CHANGELOG_VIEW_TYPE = 'ramen-changelog';
 
@@ -59,6 +62,55 @@ function ReleaseNoteBlock({ app, release, locale }: { app: App; release: Release
 	);
 }
 
+/** 아코디언 한 줄 — 접혀있을 땐 마크다운 렌더 자체를 안 함(펼칠 때 처음 한 번만). */
+function ReleaseAccordionEntry({ app, release, locale }: { app: App; release: ReleaseHistoryEntry; locale: Locale }) {
+	const [open, setOpen] = useState(false);
+	const chevronRef = useRef<HTMLSpanElement>(null);
+	const bodyRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (chevronRef.current) setIcon(chevronRef.current, 'chevron-right');
+	}, []);
+
+	useEffect(() => {
+		if (!open || !bodyRef.current) return;
+		const container = bodyRef.current;
+		container.empty();
+		const component = new Component();
+		component.load();
+		void MarkdownRenderer.render(
+			app,
+			release.body.trim() || t(locale, 'changelogNoNotes'),
+			container,
+			'',
+			component,
+		);
+		return () => {
+			component.unload();
+		};
+	}, [open, app, release.body, locale]);
+
+	return (
+		<div className="ramen-changelog-accordion-entry">
+			<button
+				type="button"
+				className="ramen-changelog-accordion-header"
+				onClick={() => setOpen((o) => !o)}
+				aria-expanded={open}
+			>
+				<span
+					ref={chevronRef}
+					className={`ramen-changelog-accordion-chevron ${open ? 'is-open' : ''}`}
+					aria-hidden="true"
+				/>
+				<span className="ramen-changelog-version">{release.version}</span>
+				<span className="ramen-changelog-date">{formatDate(release.publishedAt)}</span>
+			</button>
+			{open && <div ref={bodyRef} className="ramen-changelog-body markdown-rendered" />}
+		</div>
+	);
+}
+
 function ChangelogPage({ app, locale, fromVersion, toVersion }: {
 	app: App;
 	locale: Locale;
@@ -70,15 +122,20 @@ function ChangelogPage({ app, locale, fromVersion, toVersion }: {
 
 	useEffect(() => {
 		let cancelled = false;
-		void fetchReleaseHistory().then((list) => {
+		void fetchReleaseHistory(PAST_HISTORY_LIMIT).then((list) => {
 			if (cancelled) return;
 			if (!list) setFailed(true);
-			else setReleases(releasesSince(list, fromVersion));
+			else setReleases(list);
 		});
 		return () => {
 			cancelled = true;
 		};
-	}, [fromVersion]);
+	}, []);
+
+	// "새 업데이트 내역"(fromVersion 이후)은 펼친 채로 위에, 나머지 과거 내역은 아코디언으로 접어서 아래에 전부.
+	const newReleases = releases ? releasesSince(releases, fromVersion) : [];
+	const newVersions = new Set(newReleases.map((r) => r.version));
+	const pastReleases = releases ? releases.filter((r) => !newVersions.has(r.version)) : [];
 
 	return (
 		<div className="ramen-changelog-page">
@@ -90,11 +147,21 @@ function ChangelogPage({ app, locale, fromVersion, toVersion }: {
 			{!failed && releases && releases.length === 0 && (
 				<p className="ramen-changelog-status">{t(locale, 'changelogEmpty')}</p>
 			)}
-			{releases && releases.length > 0 && (
+			{newReleases.length > 0 && (
 				<div className="ramen-changelog">
-					{releases.map((release) => (
+					{newReleases.map((release) => (
 						<ReleaseNoteBlock key={release.version} app={app} release={release} locale={locale} />
 					))}
+				</div>
+			)}
+			{pastReleases.length > 0 && (
+				<div className="ramen-changelog-past">
+					<h2 className="ramen-changelog-past-title">{t(locale, 'changelogPastTitle')}</h2>
+					<div className="ramen-changelog-accordion">
+						{pastReleases.map((release) => (
+							<ReleaseAccordionEntry key={release.version} app={app} release={release} locale={locale} />
+						))}
+					</div>
 				</div>
 			)}
 		</div>
