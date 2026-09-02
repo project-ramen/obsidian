@@ -37,6 +37,21 @@ const IMAGE_MIME: Record<string, string> = {
 /** 이미지 내용 해시(blogId:sha256) → 업로드된 서버 URL 캐시(메모리, 세션 내 재해시 방지용). 영속 캐시는 uploadedHashKey 참고. */
 const uploadedImageCache = new Map<string, string>();
 const STANDARD_IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+/**
+ * Obsidian 이미지 크기 문법(`![[img.png|300]]`, `![[img.png|300x200]]`, `![alt|300](img.png)`)의
+ * 사이즈 부분(`300` 또는 `300x200`, 폭만 씀 — 높이는 원본 비율 유지가 보통 원하는 동작이라 버림)을
+ * 픽셀 폭 문자열로. 사이즈가 아니면(예: 위키링크 캡션으로 쓴 일반 텍스트) null.
+ */
+function parseObsidianImageSize(raw: string | undefined): string | null {
+	const m = /^(\d+)(?:x\d+)?$/.exec((raw ?? '').trim());
+	return m?.[1] ?? null;
+}
+
+/** width(px)를 web이 인식하는 마크다운 이미지 title(`"width:300px"`)로 — 없으면 빈 문자열. */
+function widthTitleSuffix(widthPx: string | null): string {
+	return widthPx ? ` "width:${widthPx}px"` : '';
+}
 /** raw HTML <img src="..."> — width/style 같은 마크다운으로 못 넣는 속성 쓰려고 직접 HTML을 섞어 쓰는 경우.
  *  그룹: 1=<img ...src= 까지, 2=따옴표, 3=src 값, 4=나머지(>까지) — src 값만 바꿔치기하고 다른 속성은 그대로 둠. */
 const HTML_IMG_SRC_RE = /(<img\b[^>]*\bsrc=)(["'])([^"']+)\2([^>]*>)/gi;
@@ -238,13 +253,16 @@ async function uploadEmbeddedImages(app: App, file: TFile, blog: BlogConfig, con
 		}
 		const url = await uploadImageFile(app, blog, resolved);
 		if (!url) continue;
-		result = result.split(original).join(`![${resolved.basename}](${url})`);
+		// ![[img.png|300]] / ![[img.png|300x200]] — displayText가 사이즈면 web이 읽는 title로 실어보냄
+		const width = parseObsidianImageSize(embed.displayText);
+		result = result.split(original).join(`![${resolved.basename}](${url}${widthTitleSuffix(width)})`);
 	}
 
-	// 2) 표준 마크다운 이미지: ![alt](상대경로) — Obsidian 설정에서 "Markdown links" 사용 시
+	// 2) 표준 마크다운 이미지: ![alt](상대경로) — Obsidian 설정에서 "Markdown links" 사용 시.
+	//    alt 끝에 |300 / |300x200이 붙으면 Obsidian 자체 사이즈 문법(alt 텍스트가 아니라 크기 지정).
 	const standardMatches = [...content.matchAll(STANDARD_IMAGE_MD_RE)];
 	for (const m of standardMatches) {
-		const alt = m[1] ?? '';
+		const rawAlt = m[1] ?? '';
 		const linkPath = m[2];
 		if (!linkPath) continue;
 		if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(linkPath) || linkPath.startsWith('/')) continue; // http(s):, data:, 이미 서버 URL
@@ -254,11 +272,15 @@ async function uploadEmbeddedImages(app: App, file: TFile, blog: BlogConfig, con
 		if (seen.has(original)) continue;
 		seen.add(original);
 
+		const sizeSplit = /^(.*)\|(\d+(?:x\d+)?)$/.exec(rawAlt);
+		const alt = sizeSplit ? sizeSplit[1] : rawAlt;
+		const width = sizeSplit ? parseObsidianImageSize(sizeSplit[2]) : null;
+
 		const resolved = app.metadataCache.getFirstLinkpathDest(decodeURIComponent(linkPath), file.path);
 		if (!(resolved instanceof TFile)) continue;
 		const url = await uploadImageFile(app, blog, resolved);
 		if (!url) continue;
-		result = result.split(`![${alt}](${linkPath})`).join(`![${alt}](${url})`);
+		result = result.split(`![${rawAlt}](${linkPath})`).join(`![${alt}](${url}${widthTitleSuffix(width)})`);
 	}
 
 	// 3) raw HTML <img src="상대경로"> — 마크다운 문법 밖에서 직접 HTML을 섞어 쓴 경우.
@@ -325,7 +347,8 @@ async function resolveBannerImage(app: App, file: TFile, blog: BlogConfig, raw: 
 
 /** 서버 업로드 URL(/uploads/...) → 다운로드해서 저장한 로컬 TFile 캐시. key: "blogId:url". */
 const downloadedImageCache = new Map<string, TFile>();
-const SERVER_UPLOAD_MD_IMAGE_RE = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)\)/g;
+// 그룹: 1=alt, 2=url, 3=title("width:300px" 등 — uploadEmbeddedImages가 실어보낸 사이즈, 없을 수 있음)
+const SERVER_UPLOAD_MD_IMAGE_RE = /!\[([^\]]*)\]\((\/uploads\/[^)\s]+)(?:\s+"([^"]*)")?\)/g;
 
 /** dir 안에서 filename과 안 겹치는 경로를 찾음 — 겹치면 Obsidian 컨벤션대로 "이름 2.ext", "이름 3.ext" 순으로 증가. */
 export function availablePathInFolder(app: App, dir: string, filename: string): string {
@@ -448,7 +471,10 @@ async function localizeEmbeddedImagesForPull(app: App, blog: BlogConfig, body: s
 		seen.add(full);
 		const file = await downloadServerImage(app, blog, url, referenceFilePath);
 		if (!file) continue;
-		result = result.split(full).join(`![[${file.name}]]`);
+		// title이 "width:300px" 형태면 Obsidian 위키링크 사이즈 문법(|300)으로 되돌림
+		const widthMatch = /^width:\s*(\d+)px$/i.exec((m[3] ?? '').trim());
+		const sizeSuffix = widthMatch ? `|${widthMatch[1]}` : '';
+		result = result.split(full).join(`![[${file.name}${sizeSuffix}]]`);
 	}
 
 	const htmlImgMatches = [...body.matchAll(HTML_IMG_SRC_RE)];
