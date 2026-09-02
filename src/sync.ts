@@ -37,6 +37,9 @@ const IMAGE_MIME: Record<string, string> = {
 /** 이미지 내용 해시(blogId:sha256) → 업로드된 서버 URL 캐시(메모리, 세션 내 재해시 방지용). 영속 캐시는 uploadedHashKey 참고. */
 const uploadedImageCache = new Map<string, string>();
 const STANDARD_IMAGE_MD_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+/** raw HTML <img src="..."> — width/style 같은 마크다운으로 못 넣는 속성 쓰려고 직접 HTML을 섞어 쓰는 경우.
+ *  그룹: 1=<img ...src= 까지, 2=따옴표, 3=src 값, 4=나머지(>까지) — src 값만 바꿔치기하고 다른 속성은 그대로 둠. */
+const HTML_IMG_SRC_RE = /(<img\b[^>]*\bsrc=)(["'])([^"']+)\2([^>]*>)/gi;
 
 /** ArrayBuffer의 SHA-256 hex digest. 같은 내용이면 파일 경로·이름·mtime이 달라도 같은 값이 나옴 —
  *  "같은 이미지가 여러 번 업로드되는" 문제를 파일 메타데이터가 아니라 실제 바이트 내용 기준으로 막기 위함. */
@@ -212,8 +215,8 @@ export function blogsForFilePath(blogs: BlogConfig[], filePath: string): BlogCon
 }
 
 /**
- * 노트 안의 로컬 vault 이미지(위키링크 `![[img.png]]` 및 표준 `![alt](상대경로)`)를 서버에 업로드하고
- * 본문의 참조를 서버 URL(`![alt](/uploads/...)`) 로 치환. 원본 vault 파일은 건드리지 않음 — 서버로 보낼 body_md에만 적용.
+ * 노트 안의 로컬 vault 이미지(위키링크 `![[img.png]]`, 표준 `![alt](상대경로)`, raw HTML `<img src="상대경로">`)를
+ * 서버에 업로드하고 본문의 참조를 서버 URL로 치환. 원본 vault 파일은 건드리지 않음 — 서버로 보낼 body_md에만 적용.
  */
 async function uploadEmbeddedImages(app: App, file: TFile, blog: BlogConfig, content: string): Promise<string> {
 	let result = content;
@@ -256,6 +259,27 @@ async function uploadEmbeddedImages(app: App, file: TFile, blog: BlogConfig, con
 		const url = await uploadImageFile(app, blog, resolved);
 		if (!url) continue;
 		result = result.split(`![${alt}](${linkPath})`).join(`![${alt}](${url})`);
+	}
+
+	// 3) raw HTML <img src="상대경로"> — 마크다운 문법 밖에서 직접 HTML을 섞어 쓴 경우.
+	//    src만 서버 URL로 바꾸고 alt/width/style 등 다른 속성은 그대로 둠.
+	const htmlImgMatches = [...content.matchAll(HTML_IMG_SRC_RE)];
+	for (const m of htmlImgMatches) {
+		const linkPath = m[3];
+		if (!linkPath) continue;
+		if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(linkPath) || linkPath.startsWith('/')) continue; // http(s):, data:, 이미 서버 URL
+		const ext = linkPath.split('.').pop()?.toLowerCase() ?? '';
+		if (!IMAGE_EXTS.has(ext)) continue;
+		const original = m[0];
+		if (seen.has(original)) continue;
+		seen.add(original);
+
+		const resolved = app.metadataCache.getFirstLinkpathDest(decodeURIComponent(linkPath), file.path);
+		if (!(resolved instanceof TFile)) continue;
+		const url = await uploadImageFile(app, blog, resolved);
+		if (!url) continue;
+		const newTag = `${m[1]}${m[2]}${url}${m[2]}${m[4]}`;
+		result = result.split(original).join(newTag);
 	}
 
 	return result;
@@ -407,13 +431,16 @@ async function localizeBannerForPull(app: App, blog: BlogConfig, banner: string 
 }
 
 /**
- * pull된 body_md 안의 서버 업로드 이미지(`![alt](/uploads/...)`)를 vault로 다운로드하고
- * 위키링크 임베드(`![[filename]]`)로 치환해서 반환. push 시 uploadEmbeddedImages가 하는 변환의 역방향.
+ * pull된 body_md 안의 서버 업로드 이미지를 vault로 다운로드해서 되돌림 — push 시 uploadEmbeddedImages가
+ * 하는 변환의 역방향. 표준 마크다운 `![alt](/uploads/...)`은 위키링크 임베드 `![[filename]]`로 치환하고,
+ * raw HTML `<img src="/uploads/...">`은 위키링크로 바꾸면 width/style 같은 속성이 날아가므로 태그는
+ * 그대로 두고 src만 로컬 파일명으로 되돌림.
  */
 async function localizeEmbeddedImagesForPull(app: App, blog: BlogConfig, body: string, referenceFilePath: string): Promise<string> {
 	let result = body;
-	const matches = [...body.matchAll(SERVER_UPLOAD_MD_IMAGE_RE)];
 	const seen = new Set<string>();
+
+	const matches = [...body.matchAll(SERVER_UPLOAD_MD_IMAGE_RE)];
 	for (const m of matches) {
 		const full = m[0];
 		const url = m[2];
@@ -423,6 +450,19 @@ async function localizeEmbeddedImagesForPull(app: App, blog: BlogConfig, body: s
 		if (!file) continue;
 		result = result.split(full).join(`![[${file.name}]]`);
 	}
+
+	const htmlImgMatches = [...body.matchAll(HTML_IMG_SRC_RE)];
+	for (const m of htmlImgMatches) {
+		const full = m[0];
+		const url = m[3];
+		if (!url || !url.startsWith('/uploads/') || seen.has(full)) continue;
+		seen.add(full);
+		const file = await downloadServerImage(app, blog, url, referenceFilePath);
+		if (!file) continue;
+		const newTag = `${m[1]}${m[2]}${encodeURI(file.name)}${m[2]}${m[4]}`;
+		result = result.split(full).join(newTag);
+	}
+
 	return result;
 }
 
