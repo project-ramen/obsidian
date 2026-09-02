@@ -1029,15 +1029,20 @@
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.ramen-changelog-accordion-header {
+.ramen-changelog-accordion-header,
+.ramen-changelog-accordion-header:hover,
+.ramen-changelog-accordion-header:focus,
+.ramen-changelog-accordion-header:active {
 	align-items: center;
-	background: none;
+	background: none !important;
 	border: none;
 	box-shadow: none !important;
 	cursor: pointer;
 	display: flex;
 	gap: 8px;
+	justify-content: flex-start;
 	padding: 10px 0;
+	text-align: left;
 	width: 100%;
 }
 

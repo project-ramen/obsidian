@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { App, Component, ItemView, MarkdownRenderer, setIcon, ViewStateResult, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { Locale, t } from '../../i18n';
-import { fetchReleaseHistory, isNewerVersion, ReleaseHistoryEntry } from '../../update-checker';
+import { fetchReleaseHistory, ReleaseHistoryEntry } from '../../update-checker';
 
 /** "이전 업데이트 내역" 아코디언에서 몇 개까지 받아올지 — GitHub API 한 번 호출, 대부분 전체 히스토리를 덮음. */
 const PAST_HISTORY_LIMIT = 50;
@@ -19,15 +19,6 @@ function formatDate(iso: string): string {
 	const d = new Date(iso);
 	if (Number.isNaN(d.getTime())) return '';
 	return d.toISOString().slice(0, 10);
-}
-
-/** 릴리즈 목록(최신순)에서 fromVersion보다 새 버전들만. fromVersion을 못 찾으면(더 예전 버전이거나
- *  기록 범위 밖) 안전하게 최신 1개만 보여줌 — 전체를 다 쏟아내는 것보다 나음. */
-function releasesSince(all: ReleaseHistoryEntry[], fromVersion: string | undefined): ReleaseHistoryEntry[] {
-	if (!fromVersion) return all.slice(0, 1);
-	const idx = all.findIndex((r) => r.version === fromVersion);
-	if (idx === -1) return all.filter((r) => isNewerVersion(r.version, fromVersion));
-	return all.slice(0, idx);
 }
 
 function ReleaseNoteBlock({ app, release, locale }: { app: App; release: ReleaseHistoryEntry; locale: Locale }) {
@@ -111,10 +102,9 @@ function ReleaseAccordionEntry({ app, release, locale }: { app: App; release: Re
 	);
 }
 
-function ChangelogPage({ app, locale, fromVersion, toVersion }: {
+function ChangelogPage({ app, locale, toVersion }: {
 	app: App;
 	locale: Locale;
-	fromVersion?: string;
 	toVersion?: string;
 }) {
 	const [releases, setReleases] = useState<ReleaseHistoryEntry[] | null>(null);
@@ -132,10 +122,9 @@ function ChangelogPage({ app, locale, fromVersion, toVersion }: {
 		};
 	}, []);
 
-	// "새 업데이트 내역"(fromVersion 이후)은 펼친 채로 위에, 나머지 과거 내역은 아코디언으로 접어서 아래에 전부.
-	const newReleases = releases ? releasesSince(releases, fromVersion) : [];
-	const newVersions = new Set(newReleases.map((r) => r.version));
-	const pastReleases = releases ? releases.filter((r) => !newVersions.has(r.version)) : [];
+	// 최신 1개만 펼쳐서 보여주고, 나머지(스킵된 중간 버전 포함 전부)는 아코디언으로 접어서 아래에.
+	const latest = releases && releases.length > 0 ? releases[0] : null;
+	const rest = releases ? releases.slice(1) : [];
 
 	return (
 		<div className="ramen-changelog-page">
@@ -147,18 +136,16 @@ function ChangelogPage({ app, locale, fromVersion, toVersion }: {
 			{!failed && releases && releases.length === 0 && (
 				<p className="ramen-changelog-status">{t(locale, 'changelogEmpty')}</p>
 			)}
-			{newReleases.length > 0 && (
+			{latest && (
 				<div className="ramen-changelog">
-					{newReleases.map((release) => (
-						<ReleaseNoteBlock key={release.version} app={app} release={release} locale={locale} />
-					))}
+					<ReleaseNoteBlock key={latest.version} app={app} release={latest} locale={locale} />
 				</div>
 			)}
-			{pastReleases.length > 0 && (
+			{rest.length > 0 && (
 				<div className="ramen-changelog-past">
 					<h2 className="ramen-changelog-past-title">{t(locale, 'changelogPastTitle')}</h2>
 					<div className="ramen-changelog-accordion">
-						{pastReleases.map((release) => (
+						{rest.map((release) => (
 							<ReleaseAccordionEntry key={release.version} app={app} release={release} locale={locale} />
 						))}
 					</div>
@@ -222,7 +209,7 @@ export class ChangelogView extends ItemView {
 	private render(): void {
 		if (!this.root) return;
 		this.root.render(
-			<ChangelogPage app={this.app} locale={this.locale} fromVersion={this.fromVersion} toVersion={this.toVersion} />,
+			<ChangelogPage app={this.app} locale={this.locale} toVersion={this.toVersion} />,
 		);
 	}
 }
