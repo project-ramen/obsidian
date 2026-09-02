@@ -412,7 +412,6 @@
 	flex-direction: column;
 	flex-shrink: 0;
 	gap: 8px;
-	overflow-x: auto;
 	padding: 12px 16px;
 	border-bottom: 1px solid var(--background-modifier-border);
 	margin: 30px 0;
@@ -431,6 +430,34 @@
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
 	user-select: none;
+}
+
+.ramen-strip-items {
+	display: flex;
+	flex-direction: row;
+	gap: 8px;
+	overflow-x: auto;
+	padding-bottom: 6px;
+	scrollbar-width: thin; /* Firefox */
+}
+
+/* macOS는 스크롤바를 기본 오버레이(제스처 중에만 표시)로 그려서
+   webkit 스크롤바를 직접 그려 항상 보이게 함 */
+.ramen-strip-items::-webkit-scrollbar {
+	height: 6px;
+}
+
+.ramen-strip-items::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.ramen-strip-items::-webkit-scrollbar-thumb {
+	background: var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+.ramen-strip-items::-webkit-scrollbar-thumb:hover {
+	background: var(--text-faint);
 }
 
 .ramen-strip-item {

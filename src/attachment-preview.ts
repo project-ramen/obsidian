@@ -156,9 +156,10 @@ export class AttachmentPreviewManager {
 
 		const strip = createDiv({ cls: `ramen-attachment-strip location-${attachmentLocation}` });
 		strip.createSpan({ cls: 'ramen-strip-label', text: 'Attachments' });
+		const itemsRow = strip.createDiv({ cls: 'ramen-strip-items' });
 
 		for (const item of imageItems) {
-			const wrapper = strip.createDiv({ cls: 'ramen-strip-item' });
+			const wrapper = itemsRow.createDiv({ cls: 'ramen-strip-item' });
 
 			const img = wrapper.createEl('img');
 			img.src = this.plugin.app.vault.getResourcePath(item.file);

@@ -600,7 +600,8 @@ function parseJsonField(value: unknown, fallback: unknown[] = []): unknown[] {
 async function docToFileContent(app: App, blog: BlogConfig, doc: PostDoc, referenceFilePath: string): Promise<string> {
 	const tags = parseJsonField(doc.tags) as string[];
 	const lines = ['---'];
-	lines.push(`title: "${doc.title.replace(/"/g, '\\"')}"`);
+	// title은 frontmatter에 쓰지 않음 — 파일 이름이 곧 제목(파일명 변경 = 제목 변경)이라
+	// title을 같이 쓰면 파일명과 따로 노는 값이 생겨 혼동을 줌. push 시 fm.title 없으면 file.basename 사용.
 	if (tags.length > 0) lines.push(`tags: [${tags.map(t => `"${String(t).replace(/"/g, '\\"')}"`).join(', ')}]`);
 	if (doc.published) lines.push('published: true');
 	const localBanner = await localizeBannerForPull(app, blog, doc.banner, referenceFilePath);

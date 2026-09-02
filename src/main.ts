@@ -45,7 +45,7 @@ export default class RamenPlugin extends Plugin {
 		this.applyAttachmentFolderHiding();
 
 		this.attachmentPreview = new AttachmentPreviewManager(this);
-		this.attachmentPreview.register();
+		// this.attachmentPreview.register(); // 비활성화 — 코드는 유지
 
 		this.commentPreview = new CommentPreviewManager(this);
 		this.commentPreview.register();
